@@ -351,7 +351,9 @@ def results_markdown(cmp, metrics, claims_t, mc, fun, src, rc, oracle, seeds, va
     L.append("\n### Reported vs observed (Table II; primary run = run %d)\n" % p)
     t = cmp[cmp.metric.isin(["F1", "DR", "FPR"])].copy()
     t["observed [95% CI]"] = t.apply(lambda r: f"{r.observed:.2f} [{r.ci_lo:.1f}, {r.ci_hi:.1f}]", axis=1)
-    t["range over runs"] = t.apply(lambda r: "deterministic" if np.isnan(r.run_min) else f"{r.run_min:.2f}–{r.run_max:.2f}", axis=1)
+    static = {"NoGuard", "CARE (w/o Resolution)"}
+    t["range over runs"] = t.apply(lambda r: ("deterministic" if r.condition in static else "single run")
+                                   if np.isnan(r.run_min) else f"{r.run_min:.2f}–{r.run_max:.2f}", axis=1)
     L.append(md_table(t[["condition", "metric", "reported", "observed [95% CI]", "abs_diff", "range over runs", "status"]]))
     flips = metrics[metrics.metric == "decision_flip_rate"][["condition", "value"]].rename(columns={"value": "decision flip rate across runs (%)"})
     if len(flips):

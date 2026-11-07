@@ -1,0 +1,16 @@
+{
+  "mode": "full",
+  "unit_tests": {
+    "returncode": 0,
+    "summary": "56 passed in 1.08s"
+  },
+  "smoke_check": {
+    "static_rows": 48
+  },
+  "static_deterministic": true,
+  "split_identical_to_committed": true,
+  "sources_verified": true,
+  "llm_executed_in_this_session": false,
+  "llm_errors": 0,
+  "completed_utc": "2026-11-07T06:53:31.385472+00:00"
+}

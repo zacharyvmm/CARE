@@ -186,3 +186,24 @@ The first-pass scripts (`build_dataset.py`, `run_eval.py`, `analyze.py`,
 `figures.py`, `fetch_sources.sh`) are replaced by `repro/` and the notebook. They
 remain in git history at commit `c7cad18`. The refactored builder regenerates
 the pilot-B split byte-for-byte.
+
+### L4: Confirmatory run (protocol v1.0)
+* **Run:** 2026-11-07 06:50:35–06:52:03 UTC, through the notebook in `REPRO_MODE=full`
+  with a live LLM. The protocol had been frozen at `de2bc54` and pushed before
+  the run.
+* **Volume and quality:** 5,001 calls. 0 errors, 0 retries, every call served
+  by `Amazon Bedrock`. 612,561 prompt and 13,516 completion tokens, US$0.0990.
+* **Checks:** the static decisions equal those of pilot B, and the confirmatory
+  LLM conclusions match the pilot.
+* **Archive:** `results/executed/confirmatory_live_run.{ipynb,provenance.json,validation.json}`.
+
+### L5: Notebook code change after the confirmatory run (non-methodological)
+* **Change:** after L4, the notebook's *reuse-mode* branch was changed so that it
+  no longer rewrites `observations.parquet` and keeps the live run's LLM
+  provenance. One validation key was renamed from `llm_executed` to
+  `llm_executed_in_this_session`. No data, prompt, model, parsing or metric
+  code changed.
+* **Re-execution:** the committed notebook was then re-executed in reuse mode.
+  The static guards were re-run and the LLM observations reused. All 11 output
+  tables were identical (`DataFrame.equals`) to the confirmatory outputs. The
+  live-run notebook is preserved as executed.
