@@ -1,4 +1,7 @@
-# Upstream corpora are cloned by fetch_sources.sh (pinned commits); not committed.
+# Upstream corpora (re-fetched at pinned commits by the notebook); not committed.
+data/sources/
 data/raw/
-# Raw per-call LLM cache (resumability only); every final call is in results/decisions.parquet.
+# Raw per-call LLM caches (resumability only); every call is in results/observations.parquet.
 results/cache/
+# Smoke-mode outputs are throwaway; the smoke result is recorded in results/validation.json.
+results/smoke/
