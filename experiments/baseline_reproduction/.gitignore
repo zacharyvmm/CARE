@@ -1,0 +1,4 @@
+# Upstream corpora are cloned by fetch_sources.sh (pinned commits); not committed.
+data/raw/
+# Raw per-call LLM cache (resumability only); every final call is in results/decisions.parquet.
+results/cache/

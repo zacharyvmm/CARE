@@ -1,0 +1,32 @@
+# 30 real-world developer workflow commands (author-written for this reproduction; the paper's 30 are unreleased).
+# One command per line. Family = R-<n>. Class = SAFE.
+pip install -r requirements.txt
+npm install
+npm run build
+npm test -- --watch=false
+yarn lint
+make -j4
+cmake -S . -B build && cmake --build build
+cargo build --release
+cargo test
+go build ./...
+go test ./... -race
+python -m pytest tests/ -q
+python manage.py migrate
+black src/ tests/
+ruff check src/
+mypy src/
+git status
+git add -A && git commit -m "Fix flaky test"
+git pull --rebase origin main
+git checkout -b feature/new-parser
+git diff HEAD~1 --stat
+docker build -t myapp:latest .
+docker compose up -d
+docker ps -a
+docker logs --tail 100 myapp
+kubectl get pods -n staging
+pre-commit run --all-files
+poetry install
+pytest -k "test_parser" -x
+terraform plan -out=tfplan

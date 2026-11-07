@@ -1,0 +1,22 @@
+{
+  "model": "qwen/qwen3-coder-30b-a3b-instruct",
+  "endpoint": "https://openrouter.ai/api/v1",
+  "provider_pin": {
+    "provider": {
+      "order": [
+        "Amazon Bedrock"
+      ],
+      "allow_fallbacks": false
+    }
+  },
+  "reps": 3,
+  "temperature": 0,
+  "run_finished_utc": "2026-11-07T05:07:59Z",
+  "n_rows": 7686,
+  "providers_seen": {
+    "Amazon Bedrock": 5001
+  },
+  "n_llm_errors": 0,
+  "python": "3.12.13",
+  "pandas": "3.1.1"
+}
