@@ -5,6 +5,9 @@ confirmatory live run, plus a clean-clone re-execution of the notebook. Scope
 and population limits are stated below.
 
 **Entry point:** [`baseline_reproduction.ipynb`](baseline_reproduction.ipynb). Restart & Run All.
+Each stage is one call into [`repro/pipeline.py`](repro/pipeline.py), which reads top to bottom in
+the same order. Results (§6) and diagnostics (§7) follow the pipeline; the full protocol and the
+environment details are in the appendices.
 
 | | |
 |---|---|
@@ -124,8 +127,8 @@ against the paper's numbers (PROTOCOL §10).
 |---|---|
 | `baseline_reproduction.ipynb` | executable narrative, executed in reuse mode. The live LLM execution is `results/executed/confirmatory_live_run.ipynb` |
 | `PROTOCOL.md`, `DECISIONS.md`, `config.yaml` | frozen protocol, append-only log, configuration (pins, fingerprints, reported values) |
-| `repro/` | `sources` (pinned sparse fetch, fingerprints), `dataset` (split reconstruction), `guards` (CARE + baselines, provider-pinned client), `stats` (metric formulas), `report` (tables, claims, figures) |
-| `tests/test_repro.py` | 46 unit tests: metrics vs statsmodels, parsing, CARE fail-closed path, sampling, end-to-end split. The notebook also runs the repo's 10 CARE tests |
+| `repro/` | `pipeline` (one function per notebook stage, in execution order; start here), `sources` (pinned sparse fetch, fingerprints), `dataset` (split reconstruction), `guards` (CARE + baselines, provider-pinned client), `stats` (metric formulas), `report` (tables, claims, figures, views) |
+| `tests/test_repro.py` | 49 unit tests: metrics vs statsmodels, parsing, CARE fail-closed path, sampling, end-to-end split, settings (the API key never appears in output). The notebook also runs the repo's 10 CARE tests |
 | `environment/requirements.lock.txt` | exact package versions |
 | `data/main_split.parquet`, `data/NOTICE.md` | the 549-command split and the corpus licenses (ART MIT, RedCode CC BY 4.0, NL2Bash MIT) |
 | `results/observations.parquet` | 7,686 rows (method × run × command). Each holds the decision, latency, raw LLM reply, provider, generation id, UTC timestamp, tokens, cost, and the CARE trace |

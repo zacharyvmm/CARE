@@ -226,3 +226,19 @@ the pilot-B split byte-for-byte.
   vs "deterministic" for single-run LLM rows, made before L4) were not yet
   committed. The clean-clone record confirms the committed state at `45c49c1`
   reproduces the same outputs.
+
+### L7: Notebook readability refactor (non-methodological)
+* **Date:** 2026-11-07, after L6.
+* **Change:**
+  * The orchestration code moved out of the notebook into `repro/pipeline.py`, one function per stage,
+    in execution order. Each stage takes its inputs as arguments and returns its outputs.
+  * Each notebook section is now a question, one short code cell, and the table that answers it.
+  * Results (§6) come before the diagnostics (§7), and each diagnostic asks one question.
+  * The verbatim protocol, environment JSON and inventory moved to appendices.
+  * Display views (`headline`, `by_source_view`, `redcode_view`, and others) moved into `repro/report.py`.
+    `results_markdown` now builds `report.md` from the same views.
+  * Three tests were added: the API key is never shown, the reuse-mode switch, and the headline view.
+* **Unchanged:** data, prompts, model, parsing, metric code, claim rules and every analysis call.
+* **Verification:** the notebook was re-executed in reuse mode. All 11 Parquet tables, `observations.parquet`,
+  `report.md` and both figures are **byte-identical** to those of L5/L6. In `provenance.json`, only the timestamps,
+  stage timings, the test summary and `repo_head` differ.

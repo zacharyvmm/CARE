@@ -327,6 +327,85 @@ def figures(cmp, seeds, outdir):
         fig.tight_layout()
         fig.savefig(os.path.join(outdir, "split_seed_sensitivity.png"), dpi=160, facecolor=SURFACE)
         plt.close(fig)
+    return {f[:-4]: os.path.join(outdir, f) for f in sorted(os.listdir(outdir)) if f.endswith(".png")}
+
+
+# ------------------------------------------------------------------ views (shared by the notebook and report.md)
+def headline(cmp):
+    """Table II at a glance: one row per condition, "reported → observed [95% CI]" per metric."""
+    t = cmp[cmp.metric.isin(["F1", "DR", "FPR"])]
+    cell = lambda r: (f"{r.reported:.2f} → **{r.observed:.2f}** [{r.ci_lo:.1f}, {r.ci_hi:.1f}] "  # noqa: E731
+                      + ("✓" if r.status == "consistent" else "✗"))
+    wide = t.assign(cell=t.apply(cell, axis=1)).pivot(index="condition", columns="metric", values="cell")
+    order = [c for c in CONDITIONS if c in wide.index and c != "NoGuard"]
+    return wide.loc[order, ["F1", "DR", "FPR"]].reset_index()
+
+
+def table_ii_view(cmp):
+    t = cmp[cmp.metric.isin(["F1", "DR", "FPR"])].copy()
+    t["observed [95% CI]"] = t.apply(lambda r: f"{r.observed:.2f} [{r.ci_lo:.1f}, {r.ci_hi:.1f}]", axis=1)
+    static = {"NoGuard", "CARE (w/o Resolution)"}
+    t["range over runs"] = t.apply(lambda r: ("deterministic" if r.condition in static else "single run")
+                                   if np.isnan(r.run_min) else f"{r.run_min:.2f}–{r.run_max:.2f}", axis=1)
+    return t[["condition", "metric", "reported", "observed [95% CI]", "abs_diff", "range over runs", "status"]]
+
+
+def flip_rates(metrics):
+    return metrics[metrics.metric == "decision_flip_rate"][["condition", "value"]].rename(
+        columns={"value": "decision flip rate across runs (%)"})
+
+
+def latency_view(cmp):
+    return cmp[cmp.metric == "latency_mean"][["condition", "reported", "observed"]].rename(
+        columns={"reported": "reported mean ms", "observed": "observed mean ms"})
+
+
+def usage_line(metrics):
+    cost = metrics[metrics.metric.isin(["prompt_tokens", "completion_tokens", "cost"])]
+    if not len(cost):
+        return ""
+    c = cost.groupby("metric").value.sum()
+    return (f"LLM usage over all runs: {int(c.get('prompt_tokens', 0)):,} prompt + "
+            f"{int(c.get('completion_tokens', 0)):,} completion tokens, cost ${c.get('cost', 0):.4f} (OpenRouter-reported).")
+
+
+def by_source_view(src):
+    s = src.assign(cell=src.apply(lambda r: f"{r.value:.1f} [{r.ci_lo:.0f}–{r.ci_hi:.0f}]", axis=1),
+                   col=src.apply(lambda r: f"{r.source} {r.metric} (n={r.n})", axis=1))
+    wide = s.pivot(index="condition", columns="col", values="cell")
+    return wide.loc[[c for c in CONDITIONS if c in set(s.condition)]].reset_index()
+
+
+def redcode_view(rc):
+    return rc.pivot_table(index=["scenario", "kind", "n"], columns="condition", values="detected").reset_index()
+
+
+def seed_summary(seeds):
+    q = seeds.f1.quantile([.025, .5, .975])
+    return f"F1 median {q[.5]:.2f}, 95% range {q[.025]:.2f}–{q[.975]:.2f}, max {seeds.f1.max():.2f} (reported 84.99)."
+
+
+def static_false_positives(obs, split, rep=1):
+    """SAFE-labelled commands that CARE (w/o Resolution) denies."""
+    p, _ = preds(obs, split.command_id.to_numpy(), "CARE (w/o Resolution)", rep)
+    return split[(~split.label_dangerous) & p][["source", "command"]].reset_index(drop=True)
+
+
+def judge_allowed_dangerous(obs, split):
+    """DANGEROUS-labelled commands that CARE's Resolution judge turned into ALLOW (C9)."""
+    d = obs[(obs.condition == "CARE") & obs.llm_called & obs.label_dangerous & (obs.decision == "ALLOW")]
+    d = d.merge(split[["command_id", "command"]], on="command_id")[["run_id", "source", "command", "raw_response"]]
+    return d.assign(command=d.command.str.replace(r"\s*\n\s*", " ⏎ ", regex=True).str[:160])
+
+
+def observation_counts(obs):
+    return obs.pivot_table(index="condition", columns="run_id", values="command_id", aggfunc="size").reset_index()
+
+
+def show(df, floatfmt=".2f"):
+    """Display a DataFrame as a Markdown table (renders the same in Jupyter and on GitHub)."""
+    from IPython.display import Markdown, display
+    display(Markdown(md_table(df, floatfmt)))
 
 
 # ------------------------------------------------------------------ markdown
@@ -349,24 +428,14 @@ def results_markdown(cmp, metrics, claims_t, mc, fun, src, rc, oracle, seeds, va
     L.append("### Claim verdicts (rules frozen in PROTOCOL.md §6)\n")
     L.append(md_table(claims_t[["claim_id", "claim", "paper_source", "outcome", "evidence"]]))
     L.append("\n### Reported vs observed (Table II; primary run = run %d)\n" % p)
-    t = cmp[cmp.metric.isin(["F1", "DR", "FPR"])].copy()
-    t["observed [95% CI]"] = t.apply(lambda r: f"{r.observed:.2f} [{r.ci_lo:.1f}, {r.ci_hi:.1f}]", axis=1)
-    static = {"NoGuard", "CARE (w/o Resolution)"}
-    t["range over runs"] = t.apply(lambda r: ("deterministic" if r.condition in static else "single run")
-                                   if np.isnan(r.run_min) else f"{r.run_min:.2f}–{r.run_max:.2f}", axis=1)
-    L.append(md_table(t[["condition", "metric", "reported", "observed [95% CI]", "abs_diff", "range over runs", "status"]]))
-    flips = metrics[metrics.metric == "decision_flip_rate"][["condition", "value"]].rename(columns={"value": "decision flip rate across runs (%)"})
+    L.append(md_table(table_ii_view(cmp)))
+    flips = flip_rates(metrics)
     if len(flips):
         L.append("\n" + md_table(flips))
-    lat = cmp[cmp.metric == "latency_mean"][["condition", "reported", "observed"]].rename(
-        columns={"reported": "reported mean ms", "observed": "observed mean ms"})
     L.append("\nLatency (not directly comparable: laptop CPU and a hosted API vs. 4×H100 + local vLLM):\n")
-    L.append(md_table(lat))
-    cost = metrics[metrics.metric.isin(["prompt_tokens", "completion_tokens", "cost"])]
-    if len(cost):
-        c = cost.groupby("metric").value.sum()
-        L.append(f"\nLLM usage over all runs: {int(c.get('prompt_tokens', 0)):,} prompt + "
-                 f"{int(c.get('completion_tokens', 0)):,} completion tokens, cost ${c.get('cost', 0):.4f} (OpenRouter-reported).\n")
+    L.append(md_table(latency_view(cmp)))
+    if usage := usage_line(metrics):
+        L.append(f"\n{usage}\n")
     L.append("\n### Paired McNemar tests (primary run; two-sided, Yates as in Table VIII)\n")
     L.append(md_table(mc, ".3g"))
     L.append("\n### Resolution funnel (paper App. A.F: 117 WARN → 94 skipped → 23 judged → 3 ALLOW, 0 DANGEROUS)\n")
@@ -374,15 +443,12 @@ def results_markdown(cmp, metrics, claims_t, mc, fun, src, rc, oracle, seeds, va
     L.append("\n### Upper bounds for any Resolution judge on the released static stack (derived)\n")
     L.append(md_table(oracle))
     L.append("\n### Per-source rates (primary run; Wilson 95% CI)\n")
-    s = src.assign(cell=src.apply(lambda r: f"{r.value:.1f} [{r.ci_lo:.0f}–{r.ci_hi:.0f}]", axis=1),
-                   col=src.apply(lambda r: f"{r.source} {r.metric} (n={r.n})", axis=1))
-    L.append(md_table(s.pivot(index="condition", columns="col", values="cell").loc[[c for c in CONDITIONS if c in set(s.condition)]].reset_index()))
+    L.append(md_table(by_source_view(src)))
     L.append("\n### RedCode-Exec detections by scenario (primary run; scenario kind is post hoc, D9)\n")
-    L.append(md_table(rc.pivot_table(index=["scenario", "kind", "n"], columns="condition", values="detected").reset_index(), ".0f"))
+    L.append(md_table(redcode_view(rc), ".0f"))
     if seeds is not None:
         L.append(f"\n### Split-construction sensitivity (CARE w/o Resolution, {len(seeds)} seeds, deterministic)\n")
-        q = seeds.f1.quantile([.025, .5, .975])
-        L.append(f"F1 median {q[.5]:.2f}, 95% range {q[.025]:.2f}–{q[.975]:.2f}, max {seeds.f1.max():.2f} (reported 84.99).\n")
+        L.append(seed_summary(seeds) + "\n")
     if variants is not None:
         L.append("\n### Construction variants (CARE w/o Resolution; V2 is exploratory and post hoc)\n")
         L.append(md_table(variants))

@@ -6,6 +6,7 @@ import sys
 import types
 
 import numpy as np
+import pandas as pd
 import pytest
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -211,3 +212,29 @@ def test_conflicting_labels_dropped(mini_corpus):
     p = D.load_pools(roots, rw)
     assert "echo v 0" in p["conflicts"]          # in ART (DANGEROUS) and NL2Bash (SAFE)
     assert all(r["command"] != "echo v 0" for k in D.SOURCES for r in p[k])
+
+
+# ---------------------------------------------------------------- pipeline settings and notebook views
+from repro import pipeline as P  # noqa: E402
+from repro import report as R  # noqa: E402
+
+
+def test_settings_never_expose_api_key():
+    run = P.settings({"llm": {"reps": 3}}, environ={"OPENROUTER_API_KEY": "sk-secret-123", "REPRO_MODE": "smoke"})
+    assert run.run_llm and not run.full and run.reps == 1
+    assert "sk-secret-123" not in repr(run) and "sk-secret-123" not in P.banner(run)
+
+
+def test_settings_without_key_reuse_committed_observations():
+    run = P.settings({"llm": {"reps": 3}}, environ={})
+    assert run.full and not run.run_llm and run.reps == 3 and run.label == "confirmatory-v1"
+    assert not P.settings({"llm": {"reps": 3}}, environ={"OPENROUTER_API_KEY": "k", "REPRO_REUSE_LLM": "1"}).run_llm
+
+
+def test_headline_marks_consistency_and_orders_conditions():
+    rows = [dict(condition=c, metric=m, reported=50.0, observed=obs, ci_lo=obs - 5, ci_hi=obs + 5,
+                 status="consistent" if abs(obs - 50) <= 5 else "inconsistent")
+            for c, obs in [("CARE", 30.0), ("LLMJudge", 52.0), ("NoGuard", 0.0)] for m in ("F1", "DR", "FPR")]
+    h = R.headline(pd.DataFrame(rows))
+    assert list(h.condition) == ["LLMJudge", "CARE"]
+    assert h.F1.iloc[0].endswith("✓") and h.F1.iloc[1].endswith("✗")

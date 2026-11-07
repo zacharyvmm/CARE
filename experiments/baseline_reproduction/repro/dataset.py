@@ -232,3 +232,10 @@ def validate_split(df, targets):
                    "NL2Bash": ["SAFE"], "Real-world": ["SAFE"]}, f"labels by source {lab}"
     assert not df[df.source == "NL2Bash"].command.map(lambda c: bool(UNSAFE_NL2BASH_RE.search(c))).any(), "D5 filter leak"
     return True
+
+
+def composition(df):
+    """Per source and label: commands, template families, NL2Bash heads, multi-line commands."""
+    return df.groupby(["source", "label"]).agg(
+        n=("command_id", "size"), families=("family", "nunique"), heads=("head", "nunique"),
+        multiline=("command", lambda c: int(c.str.contains("\n").sum()))).reset_index()
