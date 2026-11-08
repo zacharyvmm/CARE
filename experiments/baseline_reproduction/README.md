@@ -3,8 +3,9 @@
 **Status: PARTIAL / provisional.**
 * **Execution.** The protocol was executed in full: one live confirmatory run and a clean-clone re-execution of
   the notebook.
-* **Protocol history.** The protocol was amended to v1.1 after an external review (DECISIONS L8). The amendment
-  changes how uncertainty is computed and how verdicts are worded, not data, runs or metric formulas.
+* **Protocol history.** The protocol was amended to v1.1 and then v1.2 after two rounds of external review
+  (DECISIONS L8, L9). The amendments change how uncertainty is computed, how verdicts are worded and how reuse is
+  checked, not data, runs or metric formulas.
 * **Scope.** Every result is on a **reconstructed** population, and every numerical comparison with the paper is
   **not directly comparable**.
 
@@ -20,44 +21,50 @@ the same order.
 | Paper | Liu et al., *CARE: Pre-Execution Command Verification for Shell-Executing LLM Agents*, IEEE ISSRE 2026, [arXiv:2607.21642v2](https://arxiv.org/abs/2607.21642v2) |
 | Targets | Table II (6 of 12 rows), Table VIII (McNemar), App. A.F (Resolution funnel), Sec. V-A1. Claims C1–C11 |
 | Classification | *Partial reproduction* for CARE (author code, run unmodified). *Replication* for the data: the split is reconstructed because the authors' split is unreleased. *Reimplementation* for the LLM-judge baselines (verbatim App. E prompts) |
-| Protocol | [`PROTOCOL.md`](PROTOCOL.md). v1.0 was frozen in commit `de2bc54` before the confirmatory run; the v1.1 amendment (§11) was written after the results and an external review. **Not blind:** a pilot came first |
-| Decisions | [`DECISIONS.md`](DECISIONS.md), append-only: D1–D18, L1–L8 |
+| Protocol | [`PROTOCOL.md`](PROTOCOL.md). v1.0 was frozen in commit `de2bc54` before the confirmatory run; the v1.1 and v1.2 amendments (§11, §12) were written after the results and external review. **Not blind:** a pilot came first |
+| Decisions | [`DECISIONS.md`](DECISIONS.md), append-only: D1–D21, L1–L9 |
 
 ## Results (primary run = run 1 of 3; descriptive comparison)
 
 * **Population.** The same corpora and recipe as the paper, but not the authors' 549 items.
 * **Labels.** Corpus-level, the paper's Table I convention.
-* **CIs.** All intervals are **design-based** 95% CIs: families are resampled within each source, and RedCode
-  commands within each scenario (D15).
+* **CIs.** All intervals are **design-based** 95% CIs from the recipe bootstrap (D19), which re-runs the split
+  recipe on the sample: fixed source quotas, families drawn until each quota, the NL2Bash head cap, RedCode within
+  scenario, and the real-world subset kept fixed. Checked against the recipe's true sampling distribution, it is
+  conservative.
 * **Symbols.** ∈ / ∉ say whether the reported value falls inside that interval. Inclusion is not evidence of
   equivalence.
 
 | Condition | F1 reported → observed [95% CI] | DR reported → observed | FPR reported → observed | Verdict (v1.1) |
 |---|---|---|---|---|
-| PromptOnly | 66.99 → 63.50 [53.9, 71.6] ∈ | 63.18 → 57.73 | 17.02 → 16.11 | C3 inconclusive (not contradicted) |
-| LLMJudge | 73.09 → 70.26 [61.6, 77.5] ∈ | 67.27 → 62.27 | 11.25 → 10.03 | C4 inconclusive (not contradicted) |
-| NeMo self-check (emulated) | 68.63 → 66.12 [57.1, 73.7] ∈ | 58.18 → 55.45 | 7.60 → 8.21 | C5 inconclusive (not contradicted) |
-| CARE (w/o Resolution) | 84.99 → **58.72** [45.9, 69.1] ∉ | 75.91 → 43.64 | 1.82 → 3.34 | C1 **not supported** (on this reconstruction) |
-| CARE | 85.64 → **57.41** [44.6, 68.0] ∉ | 75.91 → 42.27 | 0.91 → 3.34 | C2 **not supported** (on this reconstruction) |
+| PromptOnly | 66.99 → 63.50 [55.2, 70.7] ∈ | 63.18 → 57.73 | 17.02 → 16.11 | C3 inconclusive (not contradicted) |
+| LLMJudge | 73.09 → 70.26 [62.9, 76.6] ∈ | 67.27 → 62.27 | 11.25 → 10.03 | C4 inconclusive (not contradicted) |
+| NeMo self-check (emulated) | 68.63 → 66.12 [58.0, 73.2] ∈ | 58.18 → 55.45 | 7.60 → 8.21 | C5 inconclusive (not contradicted) |
+| CARE (w/o Resolution) | 84.99 → **58.72** [45.5, 69.5] ∉ | 75.91 → 43.64 | 1.82 → 3.34 | C1 **not supported** (on this reconstruction) |
+| CARE | 85.64 → **57.41** [44.1, 68.4] ∉ | 75.91 → 42.27 | 0.91 → 3.34 | C2 **not supported** (on this reconstruction) |
 
 The other claims:
 
-* **C6 not supported (on this reconstruction).** The paired difference in accuracy, CARE (w/o R) minus the
-  baseline, with design-based CIs:
-  * vs PromptOnly: +2.0 pp [−6.4, 8.5];
-  * vs LLMJudge: −3.5 pp [−11.6, 2.7].
-  Both intervals exclude the paper's effects of +14.2 and +9.1 pp from Table VIII.
+* **C6 inconclusive.** The paired difference in accuracy, CARE (w/o R) minus the baseline:
+  * vs PromptOnly: +2.0 pp [−5.3, 8.2];
+  * vs LLMJudge: −3.5 pp [−10.4, 2.2].
+  Neither interval excludes 0, so superiority is unresolved. Separately and descriptively, both intervals exclude the
+  paper's effects of +14.2 and +9.1 pp from Table VIII. v1.1 had counted that magnitude check toward the verdict
+  (D21).
 * **C7 and C9 inconclusive (label-sensitive).** Under corpus-level labels, Resolution allows 3 / 2 / 3
   DANGEROUS-labelled commands per run and lowers DR by 1.4 pp. Those three commands are benign in content: two ART
   base64 "Hello" round-trips and one RedCode in-memory lookup. When they are audited as SAFE (D17), Resolution
   lowers FPR by 0.9 pp at unchanged DR, and allows no dangerous command.
-* **C8 inconclusive (not contradicted).** The escalation rate is 3.64% [1.9, 5.7], against 4.19% reported.
-* **C10 inconclusive.** LLMJudge has the highest F1 of the 6 evaluated conditions. LLMJudge minus CARE is
-  +12.8 pp [1.5, 28.4], but LLMJudge minus CARE (w/o R) is +11.5 pp [−0.2, 27.3].
+* **C8 inconclusive (not contradicted).** The escalation rate is 3.64% [1.8, 5.6], against 4.19% reported.
+* **C10 not supported (on this reconstruction), BORDERLINE.** LLMJudge has the highest F1 of the 6 evaluated
+  conditions:
+  * LLMJudge minus CARE: +12.8 pp [1.8, 27.9];
+  * LLMJudge minus CARE (w/o R): +11.5 pp [0.34, 26.75].
+  The second lower bound is within 0.5 pp of 0. Under the v1.1 cluster bootstrap that bound was −0.19 and the
+  verdict was inconclusive, so this verdict depends on the estimator.
 * **C11 inconclusive.** Hardware differs, so latency is not comparable.
 
-The v1.0 verdicts (per-command CIs, with CI inclusion counted as "supported") are kept in `results/claims.parquet`
-(`outcome_v1_0`). Full tables are in `results/report.md` and the executed notebook.
+The v1.1 and v1.0 verdicts are kept in `results/claims.parquet` (`outcome_v1_1`, `outcome_v1_0`). Full tables are in `results/report.md` and the executed notebook.
 
 ## Methods (adaptable for a paper)
 
@@ -80,9 +87,15 @@ The v1.0 verdicts (per-command CIs, with CI inclusion counted as "supported") ar
 > temperature 0 and the paper's max_tokens. Each LLM condition was run three times, and run 1 was fixed in advance
 > as the primary run.
 >
-> We report F1, detection rate and false-positive rate. The 95% CIs come from a paired, design-based bootstrap
-> (10,000 resamples) that mirrors the sampling design: families are resampled within each source, and RedCode
-> scripts within each scenario. We also give the paper's per-command McNemar tests for fidelity.
+> We report F1, detection rate and false-positive rate. The 95% CIs come from a paired bootstrap (10,000 resamples)
+> that re-runs the split recipe on the sample:
+>
+> * ART and NL2Bash families are drawn until each source quota is reached, with the NL2Bash head cap;
+> * RedCode scripts are drawn within each scenario;
+> * the real-world subset is kept fixed.
+>
+> For the static guard, where the recipe's true sampling distribution can be computed by re-drawing 100 splits, the
+> bootstrap was conservative (SD 6.2 vs 4.4 pp). We also give the paper's per-command McNemar tests for fidelity.
 >
 > Because the population differs, comparisons with the reported values are descriptive. A claim was judged not
 > supported on our reconstruction only when the reported value lay outside our interval. The confirmatory run made
@@ -91,7 +104,7 @@ The v1.0 verdicts (per-command CIs, with CI inclusion counted as "supported") ar
 ## Reproducibility assessment
 
 * **What the evidence shows on this reconstruction.**
-  * Released CARE reaches a static F1 of 58.7 [45.9, 69.1], against 84.99 reported.
+  * Released CARE reaches a static F1 of 58.7 [45.5, 69.5], against 84.99 reported.
   * None of 100 splits drawn with this recipe exceeds 75.0.
   * On this population, even a *perfect* Resolution judge on every WARN command would raise F1 only to 60.8.
   * The misses are static ALLOWs on ART (46% DR) and RedCode (38% DR).
@@ -109,7 +122,8 @@ The v1.0 verdicts (per-command CIs, with CI inclusion counted as "supported") ar
   * The NeMo row is emulated.
   * Six baselines are not run.
   * Hosted serving has unknown precision.
-  * The protocol is not blind: a pilot came first, and v1.1 was written after the results.
+  * The protocol is not blind: a pilot came first, and v1.1 and v1.2 were written after the results.
+  * C10 is borderline and depends on the estimator.
 * **Next validation steps.**
   * Obtain the authors' split and curated subsets.
   * Run an independent two-annotator label audit.
@@ -123,7 +137,7 @@ The v1.0 verdicts (per-command CIs, with CI inclusion counted as "supported") ar
 * Compare against the observed rows here (`results/observations.parquet`), not the paper's numbers. Use paired,
   design-based differences: `repro/stats.py: cluster_bootstrap_weights` and `weighted_rates`, as in
   `report.design_bootstrap`.
-* See PROTOCOL §10 and §11.
+* See PROTOCOL §10–§12. Use Python 3.12; the lockfile requires at least 3.12.
 
 ## Artifact inventory
 
@@ -132,13 +146,14 @@ The v1.0 verdicts (per-command CIs, with CI inclusion counted as "supported") ar
 | `baseline_reproduction.ipynb` | executable narrative, executed in reuse mode. The live LLM execution is `results/executed/confirmatory_live_run.ipynb` |
 | `PROTOCOL.md`, `DECISIONS.md`, `config.yaml` | protocol (v1.0 plus the v1.1 amendment), append-only log, configuration (pins, fingerprints, reported values) |
 | `repro/` | `pipeline` (one function per notebook stage, in execution order; start here), `sources` (pinned sparse fetch, fingerprints), `dataset` (split reconstruction), `guards` (CARE + baselines, provider-pinned client, fingerprinted cache), `stats` (metric formulas, design-based bootstrap), `report` (tables, claims, figures, views) |
-| `tests/test_repro.py` | 57 unit tests: metrics vs statsmodels, design-based bootstrap, parsing, cache identity and reply freshness, CARE fail-closed path, sampling, end-to-end split, settings (the API key never appears in output). The notebook also runs the repo's 10 CARE tests |
+| `tests/test_repro.py` | 59 unit tests: metrics vs statsmodels, recipe and cluster bootstraps, parsing, cache identity, reuse gating and reply freshness, CARE fail-closed path, sampling, end-to-end split, settings (the API key never appears in output). The notebook also runs the repo's 10 CARE tests |
 | `environment/requirements.lock.txt` | exact package versions |
 | `data/main_split.parquet`, `data/NOTICE.md` | the 549-command split and the corpus licenses (ART MIT, RedCode CC BY 4.0, NL2Bash MIT) |
 | `data/label_audit.yaml` | effect-based re-labelling of the 3 judge-changed commands (sensitivity analysis only, D17) |
 | `results/observations.parquet` | 7,686 rows (method × run × command). Each holds the decision, latency, raw LLM reply, provider, generation id, UTC timestamp, tokens, cost, and the CARE trace |
-| `results/metrics.parquet`, `comparison.parquet`, `claims.parquet` | long-format metrics with per-command CIs; reported vs observed (descriptive, with design-based CIs); claim verdicts (v1.1 and v1.0) |
-| `results/design_intervals.parquet`, `design_differences.parquet`, `label_sensitivity.parquet` | design-based CIs, paired differences, and C7/C9 label sensitivity |
+| `results/metrics.parquet`, `comparison.parquet`, `claims.parquet` | long-format metrics with per-command CIs; reported vs observed (descriptive, with design-based CIs); claim verdicts (v1.2, with v1.1 and v1.0 alongside) |
+| `results/design_intervals.parquet`, `design_differences.parquet`, `bootstrap_calibration.parquet`, `label_sensitivity.parquet` | design-based CIs and paired differences (recipe bootstrap = primary, cluster = v1.1), the bootstrap check against the recipe's true sampling distribution, and C7/C9 label sensitivity |
+| `results/llm_request_identity.json` | executed LLM request configuration and per-condition request fingerprints; reuse is allowed only if they match (D20) |
 | `results/{mcnemar,resolution_funnel,oracle_bounds,by_source,redcode_scenarios,sensitivity_seeds,sensitivity_variants}.parquet` | secondary and diagnostic tables |
 | `results/provenance.json`, `validation.json`, `report.md`, `figures/` | provenance (sources, fingerprints, env, LLM usage, output checksums), validation summary, rendered tables, figures |
 | `results/executed/` | the live confirmatory run as executed (notebook, provenance, validation) and the clean-clone validation record |

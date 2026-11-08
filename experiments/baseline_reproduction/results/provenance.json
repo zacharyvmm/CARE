@@ -1,11 +1,11 @@
 {
-  "generated_utc": "2026-11-08T00:38:05.370084+00:00",
+  "generated_utc": "2026-11-08T00:53:43.496127+00:00",
   "mode": "full",
   "run_label": "confirmatory-v1",
-  "protocol_version": "1.1",
-  "protocol_sha256": "f040032169ae5e56b8786ac4731542859b94ff826e1895d6a92ed1b2b28fab2a",
-  "config_sha256": "ec4dfed72562077f8b107e72e3a6f1d684f3019901b3a51725d1486578239e66",
-  "repo_head": "7ecde6728db902d50b5a08579457af3af934da62",
+  "protocol_version": "1.2",
+  "protocol_sha256": "c4ee5142d68e7e9be95f8c3c7095914083c4e95aea30d665d0bf593800ba0d64",
+  "config_sha256": "f349e3114152ab6b50f74d5e2de7b7b207c3397ce26394a1fe565180c571ba9f",
+  "repo_head": "e365f10d249e1cd91e64527006aa96aca20c9653",
   "method_under_test": {
     "repository": "https://github.com/prisma-research/CARE (this repo, fork zacharyvmm/CARE)",
     "commit": "9d6852e2ee79ec0ac1d6579dcfb8da0b0be5b2c2",
@@ -88,22 +88,6 @@
     "sha256": "a63ec989bf7aa70ab6bf1dbe8ff4e7b50b8d39a64e1e570c2463a97948917496"
   },
   "llm": {
-    "endpoint": "https://openrouter.ai/api/v1",
-    "model": "qwen/qwen3-coder-30b-a3b-instruct",
-    "provider_order": [
-      "Amazon Bedrock"
-    ],
-    "allow_fallbacks": false,
-    "temperature": 0,
-    "max_tokens": {
-      "CARE": 8,
-      "PromptOnly": 8,
-      "LLMJudge": 8,
-      "NeMo self-check": 4
-    },
-    "retries": 6,
-    "workers": 16,
-    "reps": 3,
     "executed": true,
     "started_utc": "2026-11-07T06:50:35.680080+00:00",
     "finished_utc": "2026-11-07T06:52:03.437624+00:00",
@@ -111,6 +95,8 @@
     "cached_rows": 0,
     "reused_from": "results/observations.parquet",
     "replies_within_live_window": true,
+    "request_identity_verified": true,
+    "request_identity_how": "reconstructed after the run (DECISIONS D20): executed configuration copied from the archived live-run provenance (results/executed/confirmatory_live_run.provenance.json); fingerprints recomputed with the D18 recipe from the prompt builders and care/ sources at commit de2bc54, the commit the live run executed",
     "calls": 5001,
     "errors": 0,
     "providers": {
@@ -119,7 +105,54 @@
     "prompt_tokens": 612561,
     "completion_tokens": 13516,
     "cost_usd": 0.0989938125,
-    "retried_calls": 0
+    "retried_calls": 0,
+    "requested_config": {
+      "endpoint": "https://openrouter.ai/api/v1",
+      "model": "qwen/qwen3-coder-30b-a3b-instruct",
+      "provider_order": [
+        "Amazon Bedrock"
+      ],
+      "allow_fallbacks": false,
+      "temperature": 0,
+      "max_tokens": {
+        "CARE": 8,
+        "PromptOnly": 8,
+        "LLMJudge": 8,
+        "NeMo self-check": 4
+      },
+      "retries": 6,
+      "workers": 16,
+      "reps": 3
+    },
+    "executed_request_identity": {
+      "run_label": "confirmatory-v1",
+      "schema": "legacy: observations predate per-row request_fingerprint/from_cache columns (D18)",
+      "how_established": "reconstructed after the run (DECISIONS D20): executed configuration copied from the archived live-run provenance (results/executed/confirmatory_live_run.provenance.json); fingerprints recomputed with the D18 recipe from the prompt builders and care/ sources at commit de2bc54, the commit the live run executed",
+      "executed_at_commit": "de2bc54bfe2575a3c17006864d52ab238bd6be61",
+      "executed_config": {
+        "endpoint": "https://openrouter.ai/api/v1",
+        "model": "qwen/qwen3-coder-30b-a3b-instruct",
+        "provider_order": [
+          "Amazon Bedrock"
+        ],
+        "allow_fallbacks": false,
+        "temperature": 0,
+        "max_tokens": {
+          "CARE": 8,
+          "PromptOnly": 8,
+          "LLMJudge": 8,
+          "NeMo self-check": 4
+        }
+      },
+      "started_utc": "2026-11-07T06:50:35.680080+00:00",
+      "finished_utc": "2026-11-07T06:52:03.437624+00:00",
+      "request_fingerprints": {
+        "CARE": "aae3989aa28d9a3849addca05f641b63b710d943d77975e9d9cc9f652461d38f",
+        "PromptOnly": "3a7485202c8110e240e3bec7766ca625a7cf09ef7a3ea9c0aff342b4261a180b",
+        "LLMJudge": "eb541892322a566d0471e40e6a87553a52f973fb8f6100d412b6928e57a9d26a",
+        "NeMo self-check": "947512a1fddf6e7733b3bb2ec12da32289740c58b4f34b4e97377449d17e814d"
+      }
+    }
   },
   "environment": {
     "python": "3.12.13",
@@ -142,25 +175,25 @@
   },
   "unit_tests": {
     "returncode": 0,
-    "summary": "67 passed in 2.54s"
+    "summary": "69 passed in 1.77s"
   },
   "smoke_check": {
     "static_rows": 48
   },
   "stage_seconds": {
-    "unit_tests_s": 3.31,
-    "sources_s": 0.08,
-    "static_s": 4.05,
-    "llm_s": 0.08,
-    "analysis_s": 17.97
+    "unit_tests_s": 2.34,
+    "sources_s": 0.06,
+    "static_s": 2.56,
+    "llm_s": 0.05,
+    "analysis_s": 38.39
   },
   "outputs": {
     "results/observations.parquet": "8125550566128f2d6e8743a860e4ab143c35e1ede6f66b9e0bee92baf370abe1",
     "results/metrics.parquet": "04feb0e057cdc331d9ac1dd8dcc812eb106d26d86d7197f0ddc82e735b232778",
-    "results/comparison.parquet": "75f4c47e9fb668ce7203334318bb6926bdf9d8d0ddd0c57b822cb557eb7593e4",
-    "results/claims.parquet": "105e6eb2314bbac9e220604b048658703f7901935a7f25abbae04994423c346b",
-    "results/design_intervals.parquet": "a8c3f4e1a11e0b6f8fe059ced574000433ea4f60be141342c6bb32d278b1918a",
-    "results/design_differences.parquet": "96e5fe2faf82d0515ade25e8260f98283865ca37087e396d66e6539173c8e365",
+    "results/comparison.parquet": "19a5064370a1f7a53e206a9e04fd789610f42e2547465b4f2c0f1fbaa4a8d48a",
+    "results/claims.parquet": "039b482dbf4f06b37218a36eae333da9c99a3cbc6ac41bed11b51326aa5e6f1a",
+    "results/design_intervals.parquet": "8af97cea160913a471f74aa01278f6fc041c8fdd93748d5f7df631a5ffa2221f",
+    "results/design_differences.parquet": "c7d17364727ebb7e4e39580c793d038281602740e8e75c7e9a0ec680f062bda8",
     "results/label_sensitivity.parquet": "df77a3ec8512a16be659297457ec735e97d9d0396dbbc5185f5bc436c6b42472",
     "results/mcnemar.parquet": "3a6b96528f3266bda87f0f42c63a0e0b7f7d9f30b5d25b89194c74afc0b49600",
     "results/resolution_funnel.parquet": "e666cdd727903872988cd443fb4eda5bda53d3965c95a3e80ba7e16d99040c97",
@@ -168,6 +201,7 @@
     "results/by_source.parquet": "4a0d6fabcb97772896c4f81717d6e5df50e262568f8a4e17ecf37eb488dfdfa6",
     "results/redcode_scenarios.parquet": "e1c9198dbe7e7d3fec4b5c4bacde4490ebb85fcfa20e4e167456c79c7daf613c",
     "results/sensitivity_seeds.parquet": "0171e15d88b14ca97d53d857d24fc2a04a768e4b73fa3b23cc81bf24c739f268",
-    "results/sensitivity_variants.parquet": "f0e99eeac3d593149ecbc3c81bb19705fd02a53db5271e3f7cf39205c2cc69f7"
+    "results/sensitivity_variants.parquet": "f0e99eeac3d593149ecbc3c81bb19705fd02a53db5271e3f7cf39205c2cc69f7",
+    "results/bootstrap_calibration.parquet": "c9a98c18af871d65bf2fb1a6830addd80a22b74e5fe8474a23911deda6e29ef2"
   }
 }

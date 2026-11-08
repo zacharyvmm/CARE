@@ -112,3 +112,47 @@ def weighted_rates(w, y, yhat):
 def percentile_ci(x, level=0.95):
     a = (1 - level) / 2
     return tuple(np.nanquantile(np.asarray(x, float), [a, 1 - a]))
+
+
+def recipe_bootstrap_weights(source, family, head, quotas, n_boot=10_000, seed=0, head_cap=12,
+                             family_sources=("ART", "NL2Bash"), stratified_sources=("RedCode-Exec",),
+                             capped_sources=("NL2Bash",)):
+    """Resampling weights that re-run the split recipe on the observed sample (protocol v1.2, D19).
+
+    Mirrors `dataset.build_split` source by source:
+      * family sources (ART, NL2Bash): whole families are drawn with replacement in random
+        order and appended until the source quota is reached; the last family is truncated,
+        exactly like `family_draw`; NL2Bash also applies the per-head cap;
+      * stratified sources (RedCode-Exec): each scenario keeps its size, items drawn with
+        replacement within it (the round-robin fixes per-scenario counts);
+      * every other source (Real-world) is a fixed, deterministic subset: weight 1.
+    Source totals, and so class prevalence, are fixed as in the recipe.  Drawing with
+    replacement ignores the finite-population correction, so intervals are conservative.
+    """
+    source, family, head = np.asarray(source), np.asarray(family), np.asarray(head)
+    rng = np.random.default_rng(seed)
+    w = np.zeros((n_boot, len(source)), dtype=np.int32)
+    w[:, ~np.isin(source, list(family_sources) + list(stratified_sources))] = 1
+    for s in stratified_sources:
+        in_s = np.flatnonzero(source == s)
+        for f in sorted(set(family[in_s])):
+            items = in_s[family[in_s] == f]
+            draws = items[rng.integers(0, len(items), size=(n_boot, len(items)))]
+            np.add.at(w, (np.arange(n_boot)[:, None], draws), 1)
+    for s in family_sources:
+        in_s = np.flatnonzero(source == s)
+        fams = sorted(set(family[in_s]))
+        members = [in_s[family[in_s] == f] for f in fams]
+        quota, cap = quotas[s], (head_cap if s in capped_sources else None)
+        for b in range(n_boot):
+            n, heads = 0, {}
+            while n < quota:
+                for i in members[rng.integers(len(fams))]:
+                    if cap is not None and heads.get(head[i], 0) >= cap:
+                        continue
+                    w[b, i] += 1
+                    heads[head[i]] = heads.get(head[i], 0) + 1
+                    n += 1
+                    if n == quota:
+                        break
+    return w

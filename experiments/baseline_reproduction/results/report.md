@@ -1,20 +1,20 @@
 > All comparisons with the paper are **not directly comparable**: the population is a reconstruction (same corpora and recipe, not the authors' 549 items) and labels are corpus-level (paper Table I).
 
-### Claim verdicts (protocol v1.1, PROTOCOL.md §11; v1.0 verdicts kept for the record)
+### Claim verdicts (protocol v1.2, PROTOCOL.md §12; v1.1 and v1.0 verdicts kept for the record)
 
-| claim_id | claim | outcome | rationale | outcome_v1_0 |
-|---|---|---|---|---|
-| C1 | Table II row 'CARE (w/o Resolution)': F1/DR/FPR | not supported (on this reconstruction) | verdict on F1 (headline metric; DR/FPR descriptive): reported 84.99; observed 58.72, design-based 95% CI [45.9, 69.1]; 100 reconstructed splits: max 75.00 | not supported |
-| C2 | Table II row 'CARE': F1/DR/FPR | not supported (on this reconstruction) | verdict on F1 (headline metric; DR/FPR descriptive): reported 85.64; observed 57.41, design-based 95% CI [44.6, 68.0] | not supported |
-| C3 | Table II row 'PromptOnly': F1/DR/FPR | inconclusive (not contradicted) | verdict on F1 (headline metric; DR/FPR descriptive): reported 66.99; observed 63.50, design-based 95% CI [53.9, 71.6] | supported |
-| C4 | Table II row 'LLMJudge': F1/DR/FPR | inconclusive (not contradicted) | verdict on F1 (headline metric; DR/FPR descriptive): reported 73.09; observed 70.26, design-based 95% CI [61.6, 77.5] | supported |
-| C5 | Table II row 'NeMo self-check': F1/DR/FPR | inconclusive (not contradicted) | verdict on F1 (headline metric; DR/FPR descriptive): reported 68.63; observed 66.12, design-based 95% CI [57.1, 73.7] | supported |
-| C6 | CARE (w/o Resolution) significantly outperforms PromptOnly and LLMJudge (McNemar) | not supported (on this reconstruction) | vs PromptOnly: delta accuracy +2.00 pp [-6.4, 8.5], paper +14.21 pp; vs LLMJudge: delta accuracy -3.46 pp [-11.6, 2.7], paper +9.11 pp (design-based, paired) | not supported |
-| C7 | Resolution lowers FPR (1.82 -> 0.91) at unchanged DR | inconclusive (label-sensitive) | corpus-level labels (paper Table I convention): dFPR +0.00 pp, dDR -1.36 pp -> not supported; audited labels for judge-changed commands (D17): dFPR -0.90 pp, dDR +0.00 pp -> supported | not supported |
-| C8 | About 4.2% of commands (23/549) reach the LLM judge | inconclusive (not contradicted) | escalation 3.64% [design-based 1.9, 5.7] vs reported 4.19% | supported |
-| C9 | The judge never converts a DANGEROUS command to ALLOW | inconclusive (label-sensitive) | corpus-level labels (paper Table I convention): DANGEROUS judge ALLOWs per run [3, 2, 3]; audited labels for judge-changed commands (D17): DANGEROUS judge ALLOWs per run [0, 0, 0] | not supported |
-| C10 | CARE attains the highest F1 among the evaluated guards | inconclusive | LLMJudge - CARE (w/o Resolution): delta F1 +11.54 pp [-0.2, 27.3]; LLMJudge - CARE: delta F1 +12.85 pp [1.5, 28.4]; coverage: 6 of the paper's 12 rows | not supported |
-| C11 | CARE (w/o Resolution) mean latency 0.34 ms; CARE 2.32 ms | inconclusive | observed static mean 0.65 ms on a laptop CPU; full-CARE latency dominated by hosted-API round trips; hardware and serving differ, so not directly comparable | inconclusive |
+| claim_id | claim | outcome | rationale | outcome_v1_1 | outcome_v1_0 |
+|---|---|---|---|---|---|
+| C1 | Table II row 'CARE (w/o Resolution)': F1/DR/FPR | not supported (on this reconstruction) | verdict on F1 (headline metric; DR/FPR descriptive): reported 84.99; observed 58.72, design-based 95% CI [45.5, 69.5]; 100 reconstructed splits: max 75.00 | not supported (on this reconstruction) | not supported |
+| C2 | Table II row 'CARE': F1/DR/FPR | not supported (on this reconstruction) | verdict on F1 (headline metric; DR/FPR descriptive): reported 85.64; observed 57.41, design-based 95% CI [44.1, 68.4] | not supported (on this reconstruction) | not supported |
+| C3 | Table II row 'PromptOnly': F1/DR/FPR | inconclusive (not contradicted) | verdict on F1 (headline metric; DR/FPR descriptive): reported 66.99; observed 63.50, design-based 95% CI [55.2, 70.7] | inconclusive (not contradicted) | supported |
+| C4 | Table II row 'LLMJudge': F1/DR/FPR | inconclusive (not contradicted) | verdict on F1 (headline metric; DR/FPR descriptive): reported 73.09; observed 70.26, design-based 95% CI [62.9, 76.6] | inconclusive (not contradicted) | supported |
+| C5 | Table II row 'NeMo self-check': F1/DR/FPR | inconclusive (not contradicted) | verdict on F1 (headline metric; DR/FPR descriptive): reported 68.63; observed 66.12, design-based 95% CI [58.0, 73.2] | inconclusive (not contradicted) | supported |
+| C6 | CARE (w/o Resolution) significantly outperforms PromptOnly and LLMJudge (McNemar) | inconclusive | vs PromptOnly: delta accuracy +2.00 pp [-5.3, 8.2] (paper +14.21 pp, outside the interval); vs LLMJudge: delta accuracy -3.46 pp [-10.4, 2.2] (paper +9.11 pp, outside the interval) (design-based, paired) | not supported (on this reconstruction) | not supported |
+| C7 | Resolution lowers FPR (1.82 -> 0.91) at unchanged DR | inconclusive (label-sensitive) | corpus-level labels (paper Table I convention): dFPR +0.00 pp, dDR -1.36 pp -> not supported; audited labels for judge-changed commands (D17): dFPR -0.90 pp, dDR +0.00 pp -> supported | inconclusive (label-sensitive) | not supported |
+| C8 | About 4.2% of commands (23/549) reach the LLM judge | inconclusive (not contradicted) | escalation 3.64% [design-based 1.8, 5.6] vs reported 4.19% | inconclusive (not contradicted) | supported |
+| C9 | The judge never converts a DANGEROUS command to ALLOW | inconclusive (label-sensitive) | corpus-level labels (paper Table I convention): DANGEROUS judge ALLOWs per run [3, 2, 3]; audited labels for judge-changed commands (D17): DANGEROUS judge ALLOWs per run [0, 0, 0] | inconclusive (label-sensitive) | not supported |
+| C10 | CARE attains the highest F1 among the evaluated guards | not supported (on this reconstruction) | LLMJudge - CARE (w/o Resolution): delta F1 +11.54 pp [0.34, 26.75]; LLMJudge - CARE: delta F1 +12.85 pp [1.80, 27.94]; coverage: 6 of the paper's 12 rows; BORDERLINE: a CI bound lies within 0.5 pp of 0, so the verdict depends on the bootstrap estimator (compare outcome_v1_1) | inconclusive | not supported |
+| C11 | CARE (w/o Resolution) mean latency 0.34 ms; CARE 2.32 ms | inconclusive | observed static mean 0.65 ms on a laptop CPU; full-CARE latency dominated by hosted-API round trips; hardware and serving differ, so not directly comparable | inconclusive | inconclusive |
 
 ### Reported vs observed (Table II; primary run = run 1; descriptive)
 
@@ -23,20 +23,20 @@
 | NoGuard | F1 | 0.00 | 0.00 [0.0, 0.0] | [nan, nan] | 0.00 | deterministic |
 | NoGuard | DR | 0.00 | 0.00 [0.0, 1.7] | [nan, nan] | 0.00 | deterministic |
 | NoGuard | FPR | 0.00 | 0.00 [0.0, 1.2] | [nan, nan] | 0.00 | deterministic |
-| PromptOnly | F1 | 66.99 | 63.50 [57.8, 68.8] | [53.9, 71.6] | -3.49 | 63.50–64.66 |
-| PromptOnly | DR | 63.18 | 57.73 [51.1, 64.1] | [47.1, 67.6] | -5.45 | 57.73–58.64 |
+| PromptOnly | F1 | 66.99 | 63.50 [57.8, 68.8] | [55.2, 70.7] | -3.49 | 63.50–64.66 |
+| PromptOnly | DR | 63.18 | 57.73 [51.1, 64.1] | [47.7, 67.3] | -5.45 | 57.73–58.64 |
 | PromptOnly | FPR | 17.02 | 16.11 [12.5, 20.5] | [12.2, 20.1] | -0.91 | 15.20–16.11 |
-| LLMJudge | F1 | 73.09 | 70.26 [64.9, 75.3] | [61.6, 77.5] | -2.83 | 70.08–70.26 |
-| LLMJudge | DR | 67.27 | 62.27 [55.7, 68.4] | [52.0, 71.2] | -5.00 | 62.27–62.27 |
-| LLMJudge | FPR | 11.25 | 10.03 [7.2, 13.8] | [6.9, 13.3] | -1.22 | 10.03–10.33 |
-| NeMo self-check | F1 | 68.63 | 66.12 [60.2, 71.5] | [57.1, 73.7] | -2.51 | 66.12–67.21 |
-| NeMo self-check | DR | 58.18 | 55.45 [48.8, 61.9] | [45.5, 64.5] | -2.73 | 55.45–56.36 |
-| NeMo self-check | FPR | 7.60 | 8.21 [5.7, 11.7] | [5.2, 11.4] | 0.61 | 7.60–8.21 |
-| CARE (w/o Resolution) | F1 | 84.99 | 58.72 [52.1, 64.9] | [45.9, 69.1] | -26.27 | deterministic |
-| CARE (w/o Resolution) | DR | 75.91 | 43.64 [37.2, 50.2] | [31.2, 55.4] | -32.27 | deterministic |
+| LLMJudge | F1 | 73.09 | 70.26 [64.9, 75.3] | [62.9, 76.6] | -2.83 | 70.08–70.26 |
+| LLMJudge | DR | 67.27 | 62.27 [55.7, 68.4] | [53.2, 70.9] | -5.00 | 62.27–62.27 |
+| LLMJudge | FPR | 11.25 | 10.03 [7.2, 13.8] | [7.0, 13.1] | -1.22 | 10.03–10.33 |
+| NeMo self-check | F1 | 68.63 | 66.12 [60.2, 71.5] | [58.0, 73.2] | -2.51 | 66.12–67.21 |
+| NeMo self-check | DR | 58.18 | 55.45 [48.8, 61.9] | [46.4, 64.5] | -2.73 | 55.45–56.36 |
+| NeMo self-check | FPR | 7.60 | 8.21 [5.7, 11.7] | [5.2, 11.2] | 0.61 | 7.60–8.21 |
+| CARE (w/o Resolution) | F1 | 84.99 | 58.72 [52.1, 64.9] | [45.5, 69.5] | -26.27 | deterministic |
+| CARE (w/o Resolution) | DR | 75.91 | 43.64 [37.2, 50.2] | [30.9, 55.9] | -32.27 | deterministic |
 | CARE (w/o Resolution) | FPR | 1.82 | 3.34 [1.9, 5.9] | [1.5, 5.5] | 1.52 | deterministic |
-| CARE | F1 | 85.64 | 57.41 [50.7, 63.6] | [44.6, 68.0] | -28.23 | 57.41–57.85 |
-| CARE | DR | 75.91 | 42.27 [35.9, 48.9] | [30.1, 54.1] | -33.64 | 42.27–42.73 |
+| CARE | F1 | 85.64 | 57.41 [50.7, 63.6] | [44.1, 68.4] | -28.23 | 57.41–57.85 |
+| CARE | DR | 75.91 | 42.27 [35.9, 48.9] | [30.0, 54.5] | -33.64 | 42.27–42.73 |
 | CARE | FPR | 0.91 | 3.34 [1.9, 5.9] | [1.5, 5.5] | 2.43 | 3.34–3.34 |
 
 | condition | decision flip rate across runs (%) |
@@ -60,24 +60,32 @@ Latency (not directly comparable: laptop CPU and a hosted API vs. 4×H100 + loca
 LLM usage over all runs: 612,561 prompt + 13,516 completion tokens, cost $0.0990 (OpenRouter-reported).
 
 
-### Paired differences, design-based bootstrap (primary run; D15)
+### Paired differences, recipe bootstrap (primary run; D19)
 
 | left | right | metric | value | ci_lo | ci_hi | excludes_zero |
 |---|---|---|---|---|---|---|
-| CARE (w/o Resolution) | PromptOnly | delta_F1 | -4.78 | -21.21 | 7.70 | False |
-| CARE (w/o Resolution) | PromptOnly | delta_accuracy | 2.00 | -6.36 | 8.54 | False |
-| CARE (w/o Resolution) | LLMJudge | delta_F1 | -11.54 | -27.30 | 0.19 | False |
-| CARE (w/o Resolution) | LLMJudge | delta_accuracy | -3.46 | -11.56 | 2.71 | False |
-| CARE (w/o Resolution) | NeMo self-check | delta_F1 | -7.41 | -24.29 | 6.57 | False |
-| CARE (w/o Resolution) | NeMo self-check | delta_accuracy | -1.82 | -10.02 | 4.88 | False |
-| CARE | LLMJudge | delta_F1 | -12.85 | -28.41 | -1.47 | True |
-| CARE | LLMJudge | delta_accuracy | -4.01 | -12.09 | 2.00 | False |
-| CARE | CARE (w/o Resolution) | delta_F1 | -1.31 | -3.43 | 0.00 | False |
-| CARE | CARE (w/o Resolution) | delta_accuracy | -0.55 | -1.43 | 0.00 | False |
-| LLMJudge | CARE (w/o Resolution) | delta_F1 | 11.54 | -0.19 | 27.30 | False |
-| LLMJudge | CARE (w/o Resolution) | delta_accuracy | 3.46 | -2.71 | 11.56 | False |
-| LLMJudge | CARE | delta_F1 | 12.85 | 1.47 | 28.41 | True |
-| LLMJudge | CARE | delta_accuracy | 4.01 | -2.00 | 12.09 | False |
+| CARE (w/o Resolution) | PromptOnly | delta_F1 | -4.78 | -20.85 | 7.33 | False |
+| CARE (w/o Resolution) | PromptOnly | delta_accuracy | 2.00 | -5.28 | 8.20 | False |
+| CARE (w/o Resolution) | LLMJudge | delta_F1 | -11.54 | -26.75 | -0.34 | True |
+| CARE (w/o Resolution) | LLMJudge | delta_accuracy | -3.46 | -10.38 | 2.19 | False |
+| CARE (w/o Resolution) | NeMo self-check | delta_F1 | -7.41 | -24.14 | 6.20 | False |
+| CARE (w/o Resolution) | NeMo self-check | delta_accuracy | -1.82 | -9.29 | 4.74 | False |
+| CARE | LLMJudge | delta_F1 | -12.85 | -27.94 | -1.80 | True |
+| CARE | LLMJudge | delta_accuracy | -4.01 | -10.75 | 1.46 | False |
+| CARE | CARE (w/o Resolution) | delta_F1 | -1.31 | -3.35 | 0.00 | False |
+| CARE | CARE (w/o Resolution) | delta_accuracy | -0.55 | -1.46 | 0.00 | False |
+| LLMJudge | CARE (w/o Resolution) | delta_F1 | 11.54 | 0.34 | 26.75 | True |
+| LLMJudge | CARE (w/o Resolution) | delta_accuracy | 3.46 | -2.19 | 10.38 | False |
+| LLMJudge | CARE | delta_F1 | 12.85 | 1.80 | 27.94 | True |
+| LLMJudge | CARE | delta_accuracy | 4.01 | -1.46 | 10.75 | False |
+
+### Bootstrap calibration: static CARE F1 vs the recipe's true sampling distribution (D19)
+
+| source | sd | q025 | q975 | width |
+|---|---|---|---|---|
+| 100 re-drawn splits (true recipe sampling distribution) | 4.38 | 51.90 | 69.19 | 17.29 |
+| recipe bootstrap on the seed-42 split | 6.15 | 45.48 | 69.47 | 23.98 |
+| cluster bootstrap on the seed-42 split | 5.96 | 45.94 | 69.13 | 23.19 |
 
 ### Paired McNemar tests (primary run; two-sided, Yates as in Table VIII; assume independent commands)
 

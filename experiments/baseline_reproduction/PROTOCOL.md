@@ -264,3 +264,67 @@ become *inconclusive*, and three v1.0 *not supported* verdicts (C7, C9, C10) bec
   RedCode filter or its ART snapshot (see V3).
 * **LLM-judge rows.** That these rows are not contradicted does **not** show
   that the population is not harder.
+
+## 12. Amendment v1.2 (post-confirmatory, after external review round 2; disclosed)
+
+**Status:** written on 2026-11-08 after review round 2 (DECISIONS.md L9). The
+v1.0 and v1.1 results were both known when it was written. As before, it
+changes **no data, prompt, model, run or metric formula**. The v1.0 and v1.1
+verdicts are still computed and reported (`claims.parquet`: `outcome_v1_0`,
+`outcome_v1_1`).
+
+### 12.1 Estimand and inferential CIs (D19)
+
+* **Estimand.** The F1, DR and FPR (and paired differences) a guard would
+  obtain on a split drawn by *this recipe* from the pinned corpora.
+* **Estimator: the recipe bootstrap.** It re-runs the recipe of
+  `dataset.build_split` on the observed sample:
+  * ART and NL2Bash: whole families are drawn with replacement until each
+    source quota (149, 299) is reached. The last family is truncated in order,
+    as in `family_draw`, and NL2Bash also applies the 12-per-head cap.
+  * RedCode-Exec: commands are drawn within each scenario, keeping its size.
+  * Real-world: the fixed deterministic subset is not resampled.
+  * Consequences: source totals and class prevalence (220/549) are fixed, as in
+    the recipe. The draws are paired across conditions, with 10,000 resamples
+    and seed 0.
+* **Why it is conservative.** Drawing with replacement ignores the
+  finite-population correction (ART: 41 of about 117 technique families are
+  sampled). The intervals are therefore conservative.
+* **Calibration check.** This is checked where the truth is computable. Static
+  CARE needs no LLM, so its actual sampling distribution under the recipe is
+  obtained by re-drawing 100 splits (seeds 0–99). The bootstrap must not be
+  narrower than that distribution (`bootstrap_calibration.parquet`).
+* **Record.** The v1.1 cluster bootstrap (§11.1) is still reported, with
+  `estimator = cluster`.
+
+### 12.2 Directional claims (D21)
+
+* **Verdicts on direction only.** C6 ("significantly outperforms") and C10
+  ("highest F1") are judged on direction only:
+  * *supported* if the CI of the paired difference lies above 0;
+  * *not supported (on this reconstruction)* if it lies below 0;
+  * otherwise *inconclusive*.
+* **Effect size reported separately.** Whether the paper's effect size
+  (Table VIII) lies inside our interval is reported as a descriptive magnitude
+  check and is no longer part of the C6 verdict. Under v1.1 it was, which
+  mixed two hypotheses.
+* **Borderline flag.** A directional verdict is flagged *BORDERLINE* when a CI
+  bound lies within 0.5 pp of 0.
+* All other v1.1 rules (§11.4) are unchanged.
+
+### 12.3 Reuse identity (D20)
+
+* **Reuse condition.** Committed LLM observations are reused only if the
+  requests today would be identical to the executed ones. That means the same
+  request fingerprints (model, endpoint, provider pin, fallbacks, temperature,
+  max_tokens, prompt or CARE source) as in `results/llm_request_identity.json`.
+* **Observation checks.** The observations must record the executed model and
+  only pinned providers.
+* **Provenance.** The requested configuration and the executed request identity
+  are recorded separately in provenance.
+
+### 12.4 Environment
+
+* The lockfile requires **Python ≥ 3.12**, because NumPy 2.5.4 and SciPy 1.18.1
+  require it. Python 3.12 is the validated version. This corrects the
+  "Python ≥ 3.10" in §8.

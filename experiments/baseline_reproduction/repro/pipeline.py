@@ -233,6 +233,12 @@ def run_llm_guards(split, static_rows, cfg, run):
         llm_run.update(executed_in_this_session=cached < sum(r["llm_called"] for r in llm_rows), cached_rows=cached)
         obs = to_obs(static_rows + llm_rows)
         obs.to_parquet(obs_path, index=False)
+        identity = dict(run_label=run.label, schema="per-row request_fingerprint and from_cache (D18)",
+                        how_established="recorded at execution", executed_at_commit=_sh("git", "rev-parse", "HEAD"),
+                        executed_config=_request_config(cfg["llm"]), started_utc=llm_run["started_utc"],
+                        finished_utc=llm_run["finished_utc"],
+                        request_fingerprints={c: G.request_fingerprint(cfg["llm"], c) for c in G.LLM_METHODS})
+        json.dump(identity, open(os.path.join(run.out, "llm_request_identity.json"), "w"), indent=2)
     else:
         committed_path = os.path.join(HERE, "results", "observations.parquet")
         assert os.path.exists(committed_path), "no API key and no committed observations: LLM conditions cannot be evaluated"
@@ -242,16 +248,38 @@ def run_llm_guards(split, static_rows, cfg, run):
             obs = obs[obs.command_id.isin(split.command_id) & (obs.rep == 1)].reset_index(drop=True)
             obs.to_parquet(obs_path, index=False)
         _assert_static_matches(to_obs(static_rows), obs)
-        previous = json.load(open(os.path.join(HERE, "results", "provenance.json")))["llm"]
-        llm_run = {k: previous[k] for k in ("executed", "started_utc", "finished_utc") if k in previous}
+        identity = json.load(open(os.path.join(HERE, "results", "llm_request_identity.json")))
+        _assert_same_requests(identity, obs, cfg["llm"])
+        llm_run = dict(executed=True, started_utc=identity["started_utc"], finished_utc=identity["finished_utc"])
         _assert_replies_from_live_run(obs, llm_run)
         llm_run.update(executed_in_this_session=False, cached_rows=0,
-                       reused_from=os.path.relpath(committed_path, HERE), replies_within_live_window=True)
+                       reused_from=os.path.relpath(committed_path, HERE), replies_within_live_window=True,
+                       request_identity_verified=True, request_identity_how=identity["how_established"])
         print("✓ static decisions identical to the committed observations; LLM observations reused (not re-queried)")
+        print("✓ requested model, serving, decoding and prompts are identical to those of the executed run "
+              f"(request fingerprints; {identity['how_established'][:40]}…)")
         print(f"✓ all committed LLM replies were requested during the live run "
               f"({llm_run['started_utc'][:19]} – {llm_run['finished_utc'][:19]} UTC), with unique generation ids")
     llm_run.update(_llm_usage(obs))
     return obs, llm_run
+
+
+REQUEST_KEYS = ("endpoint", "model", "provider_order", "allow_fallbacks", "temperature", "max_tokens")
+
+
+def _request_config(llm_cfg):
+    return {k: llm_cfg[k] for k in REQUEST_KEYS}
+
+
+def _assert_same_requests(identity, obs, llm_cfg):
+    """Reuse is allowed only if today's requests would be identical to the executed ones."""
+    now = {c: G.request_fingerprint(llm_cfg, c) for c in G.LLM_METHODS}
+    assert now == identity["request_fingerprints"], (
+        "the requested LLM configuration or prompts differ from the executed run; re-run live instead of reusing")
+    assert _request_config(llm_cfg) == identity["executed_config"], "requested LLM configuration differs from the executed one"
+    llm = obs[obs.llm_called == True]  # noqa: E712
+    assert (llm.model == identity["executed_config"]["model"]).all(), "observations record a different model"
+    assert llm.provider.isin(identity["executed_config"]["provider_order"]).all(), "a reply came from an unpinned provider"
 
 
 def _assert_replies_from_live_run(obs, llm_run):
@@ -296,12 +324,15 @@ def _utc_now():
 @dataclass
 class Results:
     metrics: pd.DataFrame       # long format, every condition x run x metric, with per-command CIs
-    design: pd.DataFrame        # F1/DR/FPR with design-based 95% CIs (v1.1, D15)
-    design_diffs: pd.DataFrame  # paired differences with design-based 95% CIs (v1.1, D15)
-    escalation: dict            # CARE escalation rate with design-based CI
+    design: pd.DataFrame        # F1/DR/FPR with design-based 95% CIs (primary: recipe bootstrap, v1.2, D19)
+    design_diffs: pd.DataFrame  # paired differences with design-based 95% CIs (recipe bootstrap)
+    escalation: dict            # CARE escalation rate with design-based CI (recipe bootstrap)
+    design_v11: pd.DataFrame    # the same with the v1.1 cluster bootstrap (D15), kept for the record
+    design_diffs_v11: pd.DataFrame
+    calibration: pd.DataFrame   # bootstraps vs the recipe's true sampling distribution (static CARE, full mode)
     comparison: pd.DataFrame    # reported vs observed (Table II), descriptive
-    label_sensitivity: pd.DataFrame  # C7/C9 under corpus-level vs audited labels (v1.1, D17)
-    claims: pd.DataFrame        # C1-C11: v1.1 verdicts with the v1.0 verdicts alongside
+    label_sensitivity: pd.DataFrame  # C7/C9 under corpus-level vs audited labels (D17)
+    claims: pd.DataFrame        # C1-C11: v1.2 verdicts, with the v1.1 and v1.0 verdicts alongside
     mcnemar: pd.DataFrame       # paired tests as in the paper (Table VIII)
     funnel: pd.DataFrame        # Resolution funnel (App. A.F)
     oracle: pd.DataFrame        # upper bounds for any Resolution judge
@@ -313,7 +344,8 @@ class Results:
 
 def analyse(obs, split, sources, manifest, cfg, run):
     metrics = R.metrics_long(obs, split, cfg, split_name=run.split_name)
-    design, design_diffs, escalation = R.design_bootstrap(obs, split, cfg)
+    design, design_diffs, escalation = R.design_bootstrap(obs, split, cfg, estimator="recipe")
+    design_v11, design_diffs_v11, escalation_v11 = R.design_bootstrap(obs, split, cfg, estimator="cluster")
     comparison = R.comparison(metrics, cfg, design)
     mcnemar = R.mcnemar_table(obs, split, cfg)
     funnel = R.funnel(obs, split)
@@ -322,8 +354,13 @@ def analyse(obs, split, sources, manifest, cfg, run):
     seeds = variants = None
     if run.full:
         seeds, variants = split_sensitivity(split, redcode_items, sources, manifest, cfg)
-    claims = R.claims(comparison, mcnemar, funnel, metrics, seeds, design_diffs, escalation, label_sens, cfg)
+    common = (comparison, mcnemar, funnel, metrics, seeds)
+    claims = R.claims(*common, design, design_diffs, escalation, label_sens, cfg, version="1.2")
+    claims_v11 = R.claims(*common, design_v11, design_diffs_v11, escalation_v11, label_sens, cfg, version="1.1")
+    claims.insert(claims.columns.get_loc("outcome_v1_0"), "outcome_v1_1", claims_v11.outcome)
+    calibration = R.bootstrap_calibration(pd.concat([design, design_v11]), seeds) if seeds is not None else None
     return Results(metrics=metrics, design=design, design_diffs=design_diffs, escalation=escalation,
+                   design_v11=design_v11, design_diffs_v11=design_diffs_v11, calibration=calibration,
                    comparison=comparison, label_sensitivity=label_sens, claims=claims, mcnemar=mcnemar,
                    funnel=funnel, oracle=R.oracle_bounds(obs, split), by_source=R.by_source(obs, split),
                    redcode=redcode, seeds=seeds, variants=variants)
@@ -371,8 +408,8 @@ def export(results, report_md, run):
              save(r.metrics.assign(experiment="main"), "metrics.parquet"),
              save(r.comparison, "comparison.parquet"),
              save(r.claims, "claims.parquet"),
-             save(r.design, "design_intervals.parquet"),
-             save(r.design_diffs, "design_differences.parquet"),
+             save(pd.concat([r.design, r.design_v11], ignore_index=True), "design_intervals.parquet"),
+             save(pd.concat([r.design_diffs, r.design_diffs_v11], ignore_index=True), "design_differences.parquet"),
              save(r.label_sensitivity, "label_sensitivity.parquet"),
              save(r.mcnemar, "mcnemar.parquet"),
              save(r.funnel, "resolution_funnel.parquet"),
@@ -380,7 +417,8 @@ def export(results, report_md, run):
              save(r.by_source, "by_source.parquet"),
              save(r.redcode, "redcode_scenarios.parquet")]
     if r.seeds is not None:
-        paths += [save(r.seeds, "sensitivity_seeds.parquet"), save(r.variants, "sensitivity_variants.parquet")]
+        paths += [save(r.seeds, "sensitivity_seeds.parquet"), save(r.variants, "sensitivity_variants.parquet"),
+                  save(r.calibration, "bootstrap_calibration.parquet")]
     with open(os.path.join(run.out, "report.md"), "w") as f:
         f.write(report_md)
     return paths
@@ -389,6 +427,9 @@ def export(results, report_md, run):
 def write_provenance(run, cfg, integrity, tests, sources, manifest, llm_run, smoke, stage_seconds, paths):
     """Write `provenance.json` (everything needed to audit the run) and `validation.json` (pass/fail checks)."""
     rel = lambda p: os.path.relpath(p, HERE)  # noqa: E731
+    id_path = os.path.join(run.out if llm_run["executed_in_this_session"] else os.path.join(HERE, "results"),
+                           "llm_request_identity.json")
+    identity = json.load(open(id_path))
     sha = lambda p: SRC.sha256_file(os.path.join(HERE, p))  # noqa: E731
     provenance = dict(
         generated_utc=_utc_now(), mode=run.mode, run_label=run.label,
@@ -397,7 +438,8 @@ def write_provenance(run, cfg, integrity, tests, sources, manifest, llm_run, smo
         method_under_test=dict(cfg["method_under_test"], care_identical_to_release=True),
         paper=cfg["paper"], sources=sources.records,
         split=dict(manifest, sha256=sha("data/main_split.parquet")),
-        llm=dict(cfg["llm"], **llm_run), environment=integrity["environment"], unit_tests=tests, smoke_check=smoke,
+        llm=dict(llm_run, requested_config=cfg["llm"], executed_request_identity=identity),
+        environment=integrity["environment"], unit_tests=tests, smoke_check=smoke,
         stage_seconds={k: round(v, 2) for k, v in stage_seconds.items()},
         outputs={rel(p): SRC.sha256_file(p) for p in paths},
     )
@@ -407,6 +449,7 @@ def write_provenance(run, cfg, integrity, tests, sources, manifest, llm_run, smo
                       llm_executed_in_this_session=llm_run["executed_in_this_session"],
                       llm_cached_rows=llm_run.get("cached_rows"),
                       llm_replies_within_live_window=llm_run.get("replies_within_live_window"),
+                      llm_request_identity_verified=llm_run.get("request_identity_verified"),
                       llm_errors=llm_run["errors"], completed_utc=provenance["generated_utc"])
     json.dump(provenance, open(os.path.join(run.out, "provenance.json"), "w"), indent=2, default=str)
     json.dump(validation, open(os.path.join(run.out, "validation.json"), "w"), indent=2)

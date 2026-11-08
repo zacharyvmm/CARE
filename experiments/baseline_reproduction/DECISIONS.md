@@ -340,3 +340,89 @@ changes data, prompts, model, runs or metric formulas.
     notebook. They are now §2, before execution.
 * **What the reviewer verified:** 59 tests pass; byte-identical regeneration at
   `7ecde67`; the paper's SHA-256 matches.
+
+### D19: Recipe bootstrap replaces the v1.1 cluster bootstrap for inference (protocol v1.2 §12.1)
+* **Change:** inferential CIs now re-run the split recipe on the sample:
+  * ART and NL2Bash: families are drawn until each source quota is reached; the
+    last family is truncated; NL2Bash applies the head cap;
+  * RedCode-Exec: commands are drawn within each scenario;
+  * Real-world: the fixed subset is kept as is.
+  The v1.1 cluster bootstrap is still reported (`estimator = cluster`).
+* **Rationale:** reviewer finding F1 (L9). The v1.1 bootstrap let the source
+  totals vary: ART ranged from 67 to 268 commands across resamples, and class
+  prevalence from 29.6% to 50.7%. It also broke the NL2Bash head cap and
+  resampled the deterministic real-world subset.
+* **Evidence:**
+  * The recipe bootstrap keeps every source total fixed and the head cap
+    respected (unit-tested).
+  * Calibration against the recipe's true sampling distribution for static CARE
+    (100 re-drawn splits): the SD is 4.38 pp for the true distribution, against
+    6.15 pp for the recipe bootstrap and 5.96 pp for the v1.1 cluster
+    bootstrap. Both bootstraps are therefore conservative; the main reason is
+    that they ignore the finite-population correction.
+* **Impact:**
+  * C10's interval for LLMJudge − CARE (w/o R) moves from [−0.19, 27.30] (v1.1)
+    to [0.34, 26.75].
+  * C10 becomes *not supported (on this reconstruction)*. It is flagged
+    BORDERLINE: the lower bound is within 0.5 pp of 0, so the verdict depends on
+    the estimator.
+* **Affects:** all design-based CIs, C6, C8, C10.
+
+### D20: Reuse is gated on request identity
+* **Change:**
+  * Added `results/llm_request_identity.json`.
+  * Reuse now asserts:
+    * the current request fingerprints equal the executed ones;
+    * the requested configuration equals the executed configuration;
+    * the observations record the executed model, served only by pinned
+      providers.
+  * Provenance stores `requested_config` and `executed_request_identity`
+    separately; previously only the requested configuration was written.
+  * Live runs write the identity file at execution.
+* **Legacy run:** for the committed confirmatory run, the identity was
+  *reconstructed* after the run. The executed configuration was copied from
+  `results/executed/confirmatory_live_run.provenance.json`. The fingerprints were
+  recomputed with the D18 recipe from the prompt builders and `care/` sources at
+  `de2bc54`, the commit the live run executed, extracted with
+  `git archive de2bc54 care experiments/baseline_reproduction/repro`. They equal
+  the fingerprints of the current code (`care/` and the prompt constants are
+  unchanged since `de2bc54`). The file records this as `how_established`. The
+  observations keep their legacy schema, without per-row fingerprints.
+* **Rationale:** reviewer finding F3 (L9). Reuse could accept a different
+  configured model and write it into provenance.
+* **Affects:** provenance only.
+
+### D21: Directional claims are judged on direction only (protocol v1.2 §12.2)
+* **Change:** C6 is *inconclusive* unless the interval of the paired accuracy
+  difference excludes 0. Whether the paper's effect size lies inside the
+  interval is now reported descriptively and no longer drives the verdict.
+* **Rationale:** reviewer finding F2 (L9). The v1.1 rule rejected a directional
+  claim because a magnitude was excluded, while it accepted any positive
+  difference as support.
+* **Impact:** C6 changes from *not supported* (v1.1) to *inconclusive*. Both
+  intervals contain 0:
+  * vs PromptOnly: +2.0 pp [−5.3, 8.2];
+  * vs LLMJudge: −3.5 pp [−10.4, 2.2].
+  Both exclude the paper's effects (+14.2 and +9.1 pp).
+* **Affects:** C6 and C10 (C10 already used the direction-only rule).
+
+### L9: External review, round 2 (Codex, gpt-6.1-sol, high effort)
+* **Review:** of `e365f10`. Verdict: **REVISE**, with no blocker.
+* **Round-1 status:**
+  * R1, R3, R4, R6 and R7 resolved;
+  * R2 and R5 partially resolved.
+* **New findings:**
+  * F1 (MAJOR): the bootstrap did not match the sampling design → D19.
+  * F2 (MAJOR): the C6 rule mixed direction and magnitude → D21.
+  * F3 (MAJOR): reuse did not check request identity → D20.
+  * F4 (MINOR): the main figure showed per-command CIs while the PR said every
+    interval was design-based. The figure now draws the recipe-bootstrap CIs.
+  * F5 (MINOR): the stated Python requirement was ≥3.10 but the lockfile needs
+    ≥3.12 → PROTOCOL §12.4; the notebook, README and PR now say 3.12.
+  * F6 (MINOR): the PR described the old notebook layout → PR updated.
+* **What the reviewer verified:**
+  * 67 tests pass;
+  * byte-identical regeneration;
+  * the v1.0 verdicts equal those at `7ecde67`;
+  * the post-hoc amendment and the scope of the label audit are adequately
+    disclosed.

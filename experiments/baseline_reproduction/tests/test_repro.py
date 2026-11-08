@@ -323,3 +323,40 @@ def test_reuse_rejects_replies_outside_the_live_window():
 def test_protocol_sections_extracts_requested_sections_only():
     text = R.protocol_sections([2, 11])
     assert text.startswith("## 2. Claims") and "## 11. Amendment v1.1" in text and "## 3. " not in text
+
+
+# ---------------------------------------------------------------- recipe bootstrap (D19) and reuse identity (D20)
+def _toy_recipe():
+    source = np.array(["ART"] * 5 + ["NL2Bash"] * 6 + ["RedCode-Exec"] * 4 + ["Real-world"] * 2)
+    family = np.array(["a", "a", "a", "b", "c", "n1", "n2", "n3", "n4", "n5", "n6", "s1", "s1", "s2", "s2", "r1", "r2"])
+    head = np.array(["-"] * 5 + ["ls", "ls", "ls", "cp", "cp", "rm"] + ["-"] * 6)
+    return source, family, head
+
+
+def test_recipe_bootstrap_fixes_quotas_head_cap_and_fixed_subsets():
+    source, family, head = _toy_recipe()
+    w = S.recipe_bootstrap_weights(source, family, head, {"ART": 5, "NL2Bash": 6}, n_boot=400, seed=2, head_cap=2)
+    assert (w[:, source == "ART"].sum(1) == 5).all() and (w[:, source == "NL2Bash"].sum(1) == 6).all()
+    assert (w[:, source == "Real-world"] == 1).all()                     # deterministic subset: never resampled
+    for f in ("s1", "s2"):
+        assert (w[:, family == f].sum(1) == 2).all()                    # scenario sizes kept
+    nl = source == "NL2Bash"
+    for h in ("ls", "cp", "rm"):
+        assert (w[:, nl & (head == h)].sum(1) <= 2).all()                # head cap respected
+    a = np.flatnonzero(family == "a")                                    # truncation keeps family order
+    assert (w[:, a[1]] <= w[:, a[0]]).all() and (w[:, a[2]] <= w[:, a[1]]).all()
+    assert (S.recipe_bootstrap_weights(source, family, head, {"ART": 5, "NL2Bash": 6}, 50, seed=4, head_cap=2) ==
+            S.recipe_bootstrap_weights(source, family, head, {"ART": 5, "NL2Bash": 6}, 50, seed=4, head_cap=2)).all()
+
+
+def test_reuse_requires_identical_requests():
+    identity = dict(request_fingerprints={c: G.request_fingerprint(LLM_CFG, c) for c in G.LLM_METHODS},
+                    executed_config={k: LLM_CFG[k] for k in P.REQUEST_KEYS})
+    obs = pd.DataFrame(dict(llm_called=[True], model=["m1"], provider=["P"]))
+    P._assert_same_requests(identity, obs, LLM_CFG)
+    with pytest.raises(AssertionError):
+        P._assert_same_requests(identity, obs, dict(LLM_CFG, model="m2"))
+    with pytest.raises(AssertionError):
+        P._assert_same_requests(identity, obs.assign(provider="Other"), LLM_CFG)
+    with pytest.raises(AssertionError):
+        P._assert_same_requests(identity, obs.assign(model="m0"), LLM_CFG)
