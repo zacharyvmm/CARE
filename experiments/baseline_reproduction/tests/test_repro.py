@@ -231,10 +231,95 @@ def test_settings_without_key_reuse_committed_observations():
     assert not P.settings({"llm": {"reps": 3}}, environ={"OPENROUTER_API_KEY": "k", "REPRO_REUSE_LLM": "1"}).run_llm
 
 
-def test_headline_marks_consistency_and_orders_conditions():
-    rows = [dict(condition=c, metric=m, reported=50.0, observed=obs, ci_lo=obs - 5, ci_hi=obs + 5,
-                 status="consistent" if abs(obs - 50) <= 5 else "inconsistent")
+def test_headline_marks_design_ci_inclusion_and_orders_conditions():
+    rows = [dict(condition=c, metric=m, reported=50.0, observed=obs, design_ci_lo=obs - 5, design_ci_hi=obs + 5,
+                 inside_design_ci=abs(obs - 50) <= 5)
             for c, obs in [("CARE", 30.0), ("LLMJudge", 52.0), ("NoGuard", 0.0)] for m in ("F1", "DR", "FPR")]
     h = R.headline(pd.DataFrame(rows))
     assert list(h.condition) == ["LLMJudge", "CARE"]
-    assert h.F1.iloc[0].endswith("✓") and h.F1.iloc[1].endswith("✗")
+    assert h.F1.iloc[0].endswith("∈") and h.F1.iloc[1].endswith("∉")
+
+
+# ---------------------------------------------------------------- design-based bootstrap (D15)
+def _toy_design():
+    source = np.array(["ART"] * 6 + ["RedCode-Exec"] * 4 + ["NL2Bash"] * 3)
+    family = np.array(["a", "a", "a", "b", "b", "c", "s1", "s1", "s2", "s2", "x", "y", "z"])
+    return source, family
+
+
+def test_cluster_bootstrap_keeps_families_whole_and_strata_sizes():
+    source, family = _toy_design()
+    w = S.cluster_bootstrap_weights(source, family, n_boot=500, seed=1)
+    assert w.shape == (500, 13)
+    for f in ("a", "b", "c"):                      # members of a family always share a weight
+        idx = np.flatnonzero((source == "ART") & (family == f))
+        assert (w[:, idx] == w[:, idx[:1]]).all()
+    fam_counts = sum(w[:, np.flatnonzero((source == "ART") & (family == f))[0]] for f in ("a", "b", "c"))
+    assert (fam_counts == 3).all()                 # same number of families per resample
+    for f in ("s1", "s2"):                         # RedCode: items resampled within each scenario
+        assert (w[:, np.flatnonzero(family == f)].sum(1) == 2).all()
+    assert (w[:, source == "NL2Bash"].sum(1) == 3).all()
+    assert not (w[:, :3] == w[:, 3:4]).all()       # families do vary across resamples
+
+
+def test_cluster_bootstrap_is_seeded():
+    source, family = _toy_design()
+    assert (S.cluster_bootstrap_weights(source, family, 50, seed=3) ==
+            S.cluster_bootstrap_weights(source, family, 50, seed=3)).all()
+
+
+def test_weighted_rates_with_unit_weights_equal_point_metrics():
+    rng = np.random.default_rng(0)
+    y, p = rng.random(40) < .4, rng.random(40) < .5
+    r = S.weighted_rates(np.ones((1, 40), dtype=int), y, p)
+    m = S.point_metrics(y, p)
+    assert np.isclose(r["f1"][0], m["f1"]) and np.isclose(r["dr"][0], m["dr"]) and np.isclose(r["fpr"][0], m["fpr"])
+    assert np.isclose(r["acc"][0], (y == p).mean())
+
+
+# ---------------------------------------------------------------- LLM cache identity (D18)
+LLM_CFG = dict(model="m1", endpoint="https://x/api/v1", provider_order=["P"], allow_fallbacks=False,
+               temperature=0, max_tokens={"CARE": 8, "PromptOnly": 8, "LLMJudge": 8, "NeMo self-check": 4})
+
+
+def test_request_fingerprint_changes_with_model_prompt_and_decoding():
+    base = G.request_fingerprint(LLM_CFG, "LLMJudge")
+    assert base == G.request_fingerprint(dict(LLM_CFG), "LLMJudge")
+    assert base != G.request_fingerprint(dict(LLM_CFG, model="m2"), "LLMJudge")
+    assert base != G.request_fingerprint(dict(LLM_CFG, temperature=0.7), "LLMJudge")
+    assert base != G.request_fingerprint(LLM_CFG, "PromptOnly")
+    assert G.request_fingerprint(LLM_CFG, "CARE") != G.request_fingerprint(dict(LLM_CFG, model="m2"), "CARE")
+
+
+def test_cache_misses_when_fingerprint_differs(tmp_path):
+    path = tmp_path / "c.jsonl"
+    row = dict(condition="LLMJudge", rep=1, command_id="x", decision="DENY", model="m1",
+               request_fingerprint=G.request_fingerprint(LLM_CFG, "LLMJudge"))
+    G._Cache(str(path)).put(row)
+    cache = G._Cache(str(path))
+    assert cache.get(("LLMJudge", 1, "x", G.request_fingerprint(LLM_CFG, "LLMJudge"))) is not None
+    assert cache.get(("LLMJudge", 1, "x", G.request_fingerprint(dict(LLM_CFG, model="m2"), "LLMJudge"))) is None
+
+
+def test_observations_keep_the_model_recorded_with_each_reply():
+    split = pd.DataFrame(dict(command_id=["a", "b"], source="ART", label="DANGEROUS", label_dangerous=True))
+    rows = [dict(condition="LLMJudge", rep=1, command_id="a", decision="DENY", llm_called=True, model="old-model"),
+            dict(condition="LLMJudge", rep=1, command_id="b", decision="ALLOW", llm_called=True)]
+    obs = G.to_observations(rows, split, "t", "new-model", 42).set_index("command_id")
+    assert obs.loc["a", "model"] == "old-model" and obs.loc["b", "model"] == "new-model"
+
+
+def test_reuse_rejects_replies_outside_the_live_window():
+    obs = pd.DataFrame(dict(llm_called=[True, True], generation_id=["g1", "g2"],
+                            request_utc=["2026-11-07T06:51:00+00:00", "2026-11-07T07:30:00+00:00"]))
+    run = dict(started_utc="2026-11-07T06:50:00+00:00", finished_utc="2026-11-07T06:52:00+00:00")
+    with pytest.raises(AssertionError):
+        P._assert_replies_from_live_run(obs, run)
+    P._assert_replies_from_live_run(obs.iloc[:1], run)
+    with pytest.raises(AssertionError):
+        P._assert_replies_from_live_run(obs.assign(generation_id="g1").iloc[[0, 0]], run)
+
+
+def test_protocol_sections_extracts_requested_sections_only():
+    text = R.protocol_sections([2, 11])
+    assert text.startswith("## 2. Claims") and "## 11. Amendment v1.1" in text and "## 3. " not in text

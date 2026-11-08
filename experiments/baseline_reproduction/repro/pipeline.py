@@ -11,7 +11,7 @@ bottom is reading the experiment:
     smoke        = preflight(split, cfg, run)
     static_rows  = run_static_guards(split)
     obs, llm_run = run_llm_guards(split, static_rows, cfg, run)
-    results      = analyse(obs, split, sources, manifest, cfg, run)
+    results      = analyse(obs, split, sources, manifest, cfg, run)   # incl. design-based CIs, v1.1 verdicts
     paths        = export(results, report_md, run)
     write_provenance(...)
 
@@ -215,30 +215,52 @@ def run_static_guards(split):
 def run_llm_guards(split, static_rows, cfg, run):
     """CARE (with Resolution) and the three LLM-judge baselines, `run.reps` times each.
 
-    Live mode queries the LLM and writes `observations.parquet`.  Reuse mode (no API key)
-    reads the committed file unchanged and checks that the static decisions just
-    re-executed are identical to the committed ones.
+    Live mode queries the LLM and writes `observations.parquet`; replies reused from the
+    cache are counted separately (`cached_rows`).  Reuse mode (no API key) reads the
+    committed full-run observations unchanged -- restricted to the smoke subset and run 1
+    in smoke mode -- and checks that (a) the static decisions just re-executed equal the
+    committed ones and (b) every committed LLM reply was requested inside the live run's
+    time window with a unique generation id (no stale replies).
     """
     obs_path = os.path.join(run.out, "observations.parquet")
     to_obs = lambda rows: G.to_observations(rows, split, run.label, cfg["llm"]["model"], cfg["dataset"]["seed"])  # noqa: E731
     if run.run_llm:
-        llm_run = dict(executed=True, executed_in_this_session=True, started_utc=_utc_now())
+        llm_run = dict(executed=True, started_utc=_utc_now())
         llm_rows = G.run_llm(split, cfg["llm"], run.api_key, run.reps,
                              os.path.join(HERE, "results/cache", f"{run.label}.jsonl"))
         llm_run["finished_utc"] = _utc_now()
+        cached = sum(bool(r.get("from_cache")) and r["llm_called"] for r in llm_rows)
+        llm_run.update(executed_in_this_session=cached < sum(r["llm_called"] for r in llm_rows), cached_rows=cached)
         obs = to_obs(static_rows + llm_rows)
         obs.to_parquet(obs_path, index=False)
     else:
-        assert os.path.exists(obs_path), "no API key and no committed observations: LLM conditions cannot be evaluated"
-        obs = pd.read_parquet(obs_path)
-        assert obs.run_id.str.startswith(run.label).all(), "committed observations are not from this protocol's run"
+        committed_path = os.path.join(HERE, "results", "observations.parquet")
+        assert os.path.exists(committed_path), "no API key and no committed observations: LLM conditions cannot be evaluated"
+        obs = pd.read_parquet(committed_path)
+        assert obs.run_id.str.startswith("confirmatory-v1").all(), "committed observations are not from this protocol's run"
+        if not run.full:  # smoke reuse: the smoke subset of the committed full run, run 1 only
+            obs = obs[obs.command_id.isin(split.command_id) & (obs.rep == 1)].reset_index(drop=True)
+            obs.to_parquet(obs_path, index=False)
         _assert_static_matches(to_obs(static_rows), obs)
-        previous = json.load(open(os.path.join(run.out, "provenance.json")))["llm"]
+        previous = json.load(open(os.path.join(HERE, "results", "provenance.json")))["llm"]
         llm_run = {k: previous[k] for k in ("executed", "started_utc", "finished_utc") if k in previous}
-        llm_run.update(executed_in_this_session=False, reused_from=os.path.relpath(obs_path, HERE))
+        _assert_replies_from_live_run(obs, llm_run)
+        llm_run.update(executed_in_this_session=False, cached_rows=0,
+                       reused_from=os.path.relpath(committed_path, HERE), replies_within_live_window=True)
         print("✓ static decisions identical to the committed observations; LLM observations reused (not re-queried)")
+        print(f"✓ all committed LLM replies were requested during the live run "
+              f"({llm_run['started_utc'][:19]} – {llm_run['finished_utc'][:19]} UTC), with unique generation ids")
     llm_run.update(_llm_usage(obs))
     return obs, llm_run
+
+
+def _assert_replies_from_live_run(obs, llm_run):
+    llm = obs[obs.llm_called == True]  # noqa: E712
+    t = pd.to_datetime(llm.request_utc, utc=True)
+    assert t.notna().all() and llm.generation_id.notna().all(), "LLM replies without request metadata"
+    assert llm.generation_id.is_unique, "duplicate generation ids: replies were reused across requests"
+    lo, hi = pd.Timestamp(llm_run["started_utc"]), pd.Timestamp(llm_run["finished_utc"])
+    assert ((t >= lo) & (t <= hi)).all(), "some LLM replies predate or postdate the recorded live run"
 
 
 def _assert_static_matches(fresh, committed):
@@ -273,10 +295,14 @@ def _utc_now():
 # ---------------------------------------------------------------- stage 4: analysis
 @dataclass
 class Results:
-    metrics: pd.DataFrame       # long format, every condition x run x metric, with CIs
-    comparison: pd.DataFrame    # reported vs observed (Table II)
-    claims: pd.DataFrame        # C1-C11 verdicts (PROTOCOL.md Sec. 6)
-    mcnemar: pd.DataFrame       # paired tests (Table VIII)
+    metrics: pd.DataFrame       # long format, every condition x run x metric, with per-command CIs
+    design: pd.DataFrame        # F1/DR/FPR with design-based 95% CIs (v1.1, D15)
+    design_diffs: pd.DataFrame  # paired differences with design-based 95% CIs (v1.1, D15)
+    escalation: dict            # CARE escalation rate with design-based CI
+    comparison: pd.DataFrame    # reported vs observed (Table II), descriptive
+    label_sensitivity: pd.DataFrame  # C7/C9 under corpus-level vs audited labels (v1.1, D17)
+    claims: pd.DataFrame        # C1-C11: v1.1 verdicts with the v1.0 verdicts alongside
+    mcnemar: pd.DataFrame       # paired tests as in the paper (Table VIII)
     funnel: pd.DataFrame        # Resolution funnel (App. A.F)
     oracle: pd.DataFrame        # upper bounds for any Resolution judge
     by_source: pd.DataFrame
@@ -287,17 +313,27 @@ class Results:
 
 def analyse(obs, split, sources, manifest, cfg, run):
     metrics = R.metrics_long(obs, split, cfg, split_name=run.split_name)
-    comparison = R.comparison(metrics, cfg)
+    design, design_diffs, escalation = R.design_bootstrap(obs, split, cfg)
+    comparison = R.comparison(metrics, cfg, design)
     mcnemar = R.mcnemar_table(obs, split, cfg)
     funnel = R.funnel(obs, split)
+    label_sens = R.label_sensitivity(obs, split, load_label_audit())
     redcode, redcode_items = R.redcode_scenarios(obs, split)
     seeds = variants = None
     if run.full:
         seeds, variants = split_sensitivity(split, redcode_items, sources, manifest, cfg)
-    return Results(metrics=metrics, comparison=comparison, mcnemar=mcnemar, funnel=funnel,
-                   oracle=R.oracle_bounds(obs, split), by_source=R.by_source(obs, split), redcode=redcode,
-                   seeds=seeds, variants=variants,
-                   claims=R.claims(comparison, mcnemar, funnel, metrics, seeds, cfg))
+    claims = R.claims(comparison, mcnemar, funnel, metrics, seeds, design_diffs, escalation, label_sens, cfg)
+    return Results(metrics=metrics, design=design, design_diffs=design_diffs, escalation=escalation,
+                   comparison=comparison, label_sensitivity=label_sens, claims=claims, mcnemar=mcnemar,
+                   funnel=funnel, oracle=R.oracle_bounds(obs, split), by_source=R.by_source(obs, split),
+                   redcode=redcode, seeds=seeds, variants=variants)
+
+
+def load_label_audit():
+    """command_id -> audited label, from data/label_audit.yaml (sensitivity analysis only, D17)."""
+    import yaml
+    with open(os.path.join(HERE, "data", "label_audit.yaml"), encoding="utf-8") as f:
+        return {i["command_id"]: i["audited_label"] for i in yaml.safe_load(f)["items"]}
 
 
 def split_sensitivity(split, redcode_items, sources, manifest, cfg):
@@ -335,6 +371,9 @@ def export(results, report_md, run):
              save(r.metrics.assign(experiment="main"), "metrics.parquet"),
              save(r.comparison, "comparison.parquet"),
              save(r.claims, "claims.parquet"),
+             save(r.design, "design_intervals.parquet"),
+             save(r.design_diffs, "design_differences.parquet"),
+             save(r.label_sensitivity, "label_sensitivity.parquet"),
              save(r.mcnemar, "mcnemar.parquet"),
              save(r.funnel, "resolution_funnel.parquet"),
              save(r.oracle, "oracle_bounds.parquet"),
@@ -366,6 +405,8 @@ def write_provenance(run, cfg, integrity, tests, sources, manifest, llm_run, smo
                       split_identical_to_committed=True,
                       sources_verified=all(s["verified"] for s in sources.records.values()),
                       llm_executed_in_this_session=llm_run["executed_in_this_session"],
+                      llm_cached_rows=llm_run.get("cached_rows"),
+                      llm_replies_within_live_window=llm_run.get("replies_within_live_window"),
                       llm_errors=llm_run["errors"], completed_utc=provenance["generated_utc"])
     json.dump(provenance, open(os.path.join(run.out, "provenance.json"), "w"), indent=2, default=str)
     json.dump(validation, open(os.path.join(run.out, "validation.json"), "w"), indent=2)

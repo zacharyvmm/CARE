@@ -1,11 +1,11 @@
 {
-  "generated_utc": "2026-11-07T19:32:21.231201+00:00",
+  "generated_utc": "2026-11-08T00:38:05.370084+00:00",
   "mode": "full",
   "run_label": "confirmatory-v1",
-  "protocol_version": "1.0",
-  "protocol_sha256": "23be34f177877e83c9757261e7867f20526ec26493507e5357af82d3f61e0ec1",
-  "config_sha256": "732a280ce43f2e3020a5410337f7983a5b22e0d89dd3eec96f49dcf887cad497",
-  "repo_head": "e7be13e777e6c1a09627d0a46bbc1924b82394f0",
+  "protocol_version": "1.1",
+  "protocol_sha256": "f040032169ae5e56b8786ac4731542859b94ff826e1895d6a92ed1b2b28fab2a",
+  "config_sha256": "ec4dfed72562077f8b107e72e3a6f1d684f3019901b3a51725d1486578239e66",
+  "repo_head": "7ecde6728db902d50b5a08579457af3af934da62",
   "method_under_test": {
     "repository": "https://github.com/prisma-research/CARE (this repo, fork zacharyvmm/CARE)",
     "commit": "9d6852e2ee79ec0ac1d6579dcfb8da0b0be5b2c2",
@@ -108,7 +108,9 @@
     "started_utc": "2026-11-07T06:50:35.680080+00:00",
     "finished_utc": "2026-11-07T06:52:03.437624+00:00",
     "executed_in_this_session": false,
+    "cached_rows": 0,
     "reused_from": "results/observations.parquet",
+    "replies_within_live_window": true,
     "calls": 5001,
     "errors": 0,
     "providers": {
@@ -140,23 +142,26 @@
   },
   "unit_tests": {
     "returncode": 0,
-    "summary": "59 passed in 1.08s"
+    "summary": "67 passed in 2.54s"
   },
   "smoke_check": {
     "static_rows": 48
   },
   "stage_seconds": {
-    "unit_tests_s": 1.46,
-    "sources_s": 0.04,
-    "static_s": 1.52,
-    "llm_s": 0.03,
-    "analysis_s": 10.26
+    "unit_tests_s": 3.31,
+    "sources_s": 0.08,
+    "static_s": 4.05,
+    "llm_s": 0.08,
+    "analysis_s": 17.97
   },
   "outputs": {
     "results/observations.parquet": "8125550566128f2d6e8743a860e4ab143c35e1ede6f66b9e0bee92baf370abe1",
     "results/metrics.parquet": "04feb0e057cdc331d9ac1dd8dcc812eb106d26d86d7197f0ddc82e735b232778",
-    "results/comparison.parquet": "8cb5c67f3d07205ada1f044c97a59d0cbd4eee1ab1079a871e618ad6b4ecf2af",
-    "results/claims.parquet": "313d65963716f228b241e833c2dfd3723ee5a42003c343264d98aef382a6561c",
+    "results/comparison.parquet": "75f4c47e9fb668ce7203334318bb6926bdf9d8d0ddd0c57b822cb557eb7593e4",
+    "results/claims.parquet": "105e6eb2314bbac9e220604b048658703f7901935a7f25abbae04994423c346b",
+    "results/design_intervals.parquet": "a8c3f4e1a11e0b6f8fe059ced574000433ea4f60be141342c6bb32d278b1918a",
+    "results/design_differences.parquet": "96e5fe2faf82d0515ade25e8260f98283865ca37087e396d66e6539173c8e365",
+    "results/label_sensitivity.parquet": "df77a3ec8512a16be659297457ec735e97d9d0396dbbc5185f5bc436c6b42472",
     "results/mcnemar.parquet": "3a6b96528f3266bda87f0f42c63a0e0b7f7d9f30b5d25b89194c74afc0b49600",
     "results/resolution_funnel.parquet": "e666cdd727903872988cd443fb4eda5bda53d3965c95a3e80ba7e16d99040c97",
     "results/oracle_bounds.parquet": "b514ee277dfc131c5a7389c8d0485f0138a01874391e251c08eca3374ade3dbc",

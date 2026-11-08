@@ -176,3 +176,91 @@ CARE (w/o Resolution) and CARE. The other six Table II rows are not run (D8).
   `command_id`, not against the paper's numbers.
 * Any LLM component must use a pinned model and provider, R ≥ 3 runs, and a
   fixed primary run.
+
+## 11. Amendment v1.1 (post-confirmatory, after external review; disclosed)
+
+**Status:** written on 2026-11-07, **after** the v1.0 confirmatory results and an
+external review (DECISIONS.md L8) had both been seen. §1–§10 above are
+unchanged and their verdicts are still computed and reported
+(`claims.parquet: outcome_v1_0`). v1.1 changes **no data, prompt, model,
+parsing, run or metric formula**. It changes only how uncertainty is quantified
+and how verdicts are worded. No claim moves from *not supported* to
+*supported*. The changes go in both directions: four v1.0 *supported* verdicts (C3, C4, C5, C8)
+become *inconclusive*, and three v1.0 *not supported* verdicts (C7, C9, C10) become
+*inconclusive*.
+
+### 11.1 Inferential population and uncertainty (D15)
+
+* **Population.** Inference is about commands drawn by this recipe (§3) from
+  the pinned corpora. It is not about the authors' 549 items.
+* **How the split was drawn.**
+  * ART and NL2Bash were drawn as whole template families.
+  * RedCode-Exec was drawn by stratified round-robin over its scenarios.
+  * Commands within a family are not independent: 149 ART commands come from
+    41 families, the largest of which has 21 commands.
+* **Inferential CIs.** These come from a **design-based bootstrap**, run paired
+  across conditions on the primary run (10,000 resamples, seed 0):
+  * ART, NL2Bash and Real-world: whole families are resampled with replacement
+    within their source.
+  * RedCode-Exec: commands are resampled within each scenario.
+  * The same bootstrap gives CIs for paired differences in F1 and accuracy,
+    and for the escalation rate.
+* **Per-command CIs.** The per-command Wilson, bootstrap and McNemar results of
+  §6 are still reported, as *paper-fidelity calculations* (the paper treats
+  commands as independent). They are not used for verdicts.
+
+### 11.2 Comparability (D16)
+
+* **Every comparison is not directly comparable.** Each numerical comparison
+  with the paper differs in population (D1–D5, D11, D12), serving (D6) and,
+  for NeMo, in framework (D7). The differences are reported descriptively.
+* **The CI test is descriptive.** "Reported value inside or outside our 95%
+  CI" says only that; inclusion is **not** evidence of equivalence. No
+  equivalence margin was pre-registered, so none is used.
+
+### 11.3 Labels (D17)
+
+* **Primary labels.** These are **corpus-level**, the paper's own convention
+  (Table I: "Class denotes the two labels used throughout", one class per
+  corpus). All detection metrics therefore measure agreement with the paper's
+  labelling scheme, not audited harmfulness.
+* **Label-sensitive claims.** C7 and C9 depend on the labels of the few
+  commands the judge changes. Those commands are re-labelled under the explicit
+  effect-based policy in `data/label_audit.yaml`. Selecting them depends on the
+  predictions, so this is a sensitivity analysis only.
+
+### 11.4 Verdict rules v1.1
+
+* **Numeric claims (C1–C5 on F1, C8).**
+  * *not supported (on this reconstruction)* if the reported value lies outside
+    our design-based 95% CI;
+  * otherwise *inconclusive (not contradicted)*.
+* **Directional claim C6.** For each pair, take the design-based CI of the
+  paired difference in accuracy (CARE w/o R minus baseline).
+  * *supported* if it is above 0 for both pairs;
+  * *not supported (on this reconstruction)* if, for either pair, it lies below
+    0 or excludes the paper's effect, where the paper's effect is (left_only −
+    right_only)/549 from Table VIII;
+  * otherwise *inconclusive*.
+* **C7 and C9.** The v1.0 rule is evaluated under both the corpus-level and the
+  audited labels.
+  * If the two agree, that outcome holds.
+  * Otherwise the outcome is *inconclusive (label-sensitive)*.
+* **C10.**
+  * *not supported (on this reconstruction)* if every CARE variant's F1 is
+    below the best non-CARE condition's, with a design-based CI of the
+    difference that excludes 0;
+  * otherwise *inconclusive*.
+* **C11.** *inconclusive*, as in v1.0.
+
+### 11.5 Discrepancy language
+
+* **What the oracle bound and the seed distribution establish.** They describe
+  *this* reconstructed population and recipe only:
+  * Resolution alone cannot close the gap **on this population**.
+  * None of the 100 seeds of **this recipe** reaches the reported static F1.
+* **What they do not establish.** Neither rules out the possibility that the
+  authors' population differs, for example in its canonical attacks, its
+  RedCode filter or its ART snapshot (see V3).
+* **LLM-judge rows.** That these rows are not contradicted does **not** show
+  that the population is not harder.

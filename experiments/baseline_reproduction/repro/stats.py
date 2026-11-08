@@ -64,3 +64,51 @@ def mcnemar(correct_a, correct_b):
         return a_only, b_only, 1.0, 1.0
     chi2 = (abs(a_only - b_only) - 1) ** 2 / n  # standard Yates form (as statsmodels)
     return a_only, b_only, float(stats.chi2.sf(chi2, 1)), float(stats.binomtest(a_only, n, 0.5).pvalue)
+
+
+# ---------------------------------------------------------------- design-based (cluster) bootstrap
+def cluster_bootstrap_weights(source, family, n_boot=10_000, seed=0, stratified_sources=("RedCode-Exec",)):
+    """Resampling weights that mirror how the split was drawn (protocol v1.1, D15).
+
+    Sources sampled by whole template families (ART, NL2Bash, Real-world) resample
+    *families* with replacement within the source, keeping the number of families.
+    Sources drawn by stratified round-robin (RedCode-Exec, strata = scenarios)
+    resample *items* with replacement within each stratum.  Returns an
+    (n_boot, n) integer matrix: how many times each command enters each resample.
+    """
+    source, family = np.asarray(source), np.asarray(family)
+    rng = np.random.default_rng(seed)
+    w = np.zeros((n_boot, len(source)), dtype=np.int32)
+    for s in sorted(set(source)):
+        in_s = np.flatnonzero(source == s)
+        if s in stratified_sources:
+            for f in sorted(set(family[in_s])):
+                items = in_s[family[in_s] == f]
+                draws = rng.integers(0, len(items), size=(n_boot, len(items)))
+                np.add.at(w, (np.arange(n_boot)[:, None], items[draws]), 1)
+        else:
+            fams = sorted(set(family[in_s]))
+            members = [in_s[family[in_s] == f] for f in fams]
+            draws = rng.integers(0, len(fams), size=(n_boot, len(fams)))
+            counts = np.zeros((n_boot, len(fams)), dtype=np.int32)
+            np.add.at(counts, (np.arange(n_boot)[:, None], draws), 1)
+            for j, m in enumerate(members):
+                w[:, m] += counts[:, [j]]
+    return w
+
+
+def weighted_rates(w, y, yhat):
+    """F1, DR, FPR (fractions) for every resample row of weight matrix `w`."""
+    y, yhat = np.asarray(y, bool), np.asarray(yhat, bool)
+    tp, fp = w @ (y & yhat), w @ (~y & yhat)
+    fn, tn = w @ (y & ~yhat), w @ (~y & ~yhat)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        f1 = np.where(tp > 0, 2 * tp / (2 * tp + fp + fn), 0.0)
+        dr = np.where(tp + fn > 0, tp / (tp + fn), np.nan)
+        fpr = np.where(fp + tn > 0, fp / (fp + tn), np.nan)
+    return dict(f1=f1, dr=dr, fpr=fpr, acc=(tp + tn) / w.sum(1))
+
+
+def percentile_ci(x, level=0.95):
+    a = (1 - level) / 2
+    return tuple(np.nanquantile(np.asarray(x, float), [a, 1 - a]))

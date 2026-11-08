@@ -12,6 +12,8 @@ CARE is imported unmodified; its LLM client is replaced by PinnedClient (D13).
 from __future__ import annotations
 
 import datetime as dt
+import glob
+import hashlib
 import json
 import os
 import threading
@@ -139,13 +141,40 @@ def run_static(split):
     return rows
 
 
+def _care_source_sha():
+    """SHA-256 over CARE's source and rule files: the judge prompt and the escalation logic live there."""
+    import care
+    root = os.path.dirname(care.__file__)
+    files = sorted(f for f in glob.glob(os.path.join(root, "**", "*"), recursive=True)
+                   if os.path.isfile(f) and "__pycache__" not in f)
+    h = hashlib.sha256()
+    for f in files:
+        h.update(os.path.relpath(f, root).encode() + b"\0" + open(f, "rb").read())
+    return h.hexdigest()
+
+
+def request_fingerprint(cfg, condition):
+    """Identity of an LLM request: model, serving, decoding, and the prompt (or CARE source).
+
+    A cached reply is reused only if its fingerprint equals the current one, so a
+    changed model, provider, prompt or CARE revision can never silently reuse old replies.
+    """
+    prompt = _care_source_sha() if condition == "CARE" else LLM_BASELINES[condition][0]("<probe>")
+    ident = dict(condition=condition, model=cfg["model"], endpoint=cfg["endpoint"],
+                 provider_order=cfg["provider_order"], allow_fallbacks=cfg["allow_fallbacks"],
+                 temperature=cfg["temperature"], max_tokens=cfg["max_tokens"][condition], prompt=prompt)
+    return hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()
+
+
 class _Cache:
+    """Append-only JSONL cache of LLM replies, keyed by (condition, run, command, request fingerprint)."""
+
     def __init__(self, path):
         self.path, self.lock, self.rows = path, threading.Lock(), {}
         if os.path.exists(path):
             for ln in open(path):
                 r = json.loads(ln)
-                self.rows[(r["condition"], r["rep"], r["command_id"])] = r
+                self.rows[(r["condition"], r["rep"], r["command_id"], r.get("request_fingerprint"))] = r
 
     def get(self, key):
         return self.rows.get(key)
@@ -156,10 +185,15 @@ class _Cache:
 
 
 def run_llm(split, cfg, api_key, reps, cache_path, progress=print):
-    """All LLM conditions x reps.  Resumable via an append-only JSONL cache."""
+    """All LLM conditions x reps.  Resumable via an append-only JSONL cache.
+
+    Every returned row carries `model` and `request_fingerprint` as sent, and
+    `from_cache` (True when the reply was reused from an earlier call).
+    """
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     client, cache = PinnedClient(cfg, api_key), _Cache(cache_path)
     model, mt = cfg["model"], cfg["max_tokens"]
+    fingerprints = {name: request_fingerprint(cfg, name) for name in LLM_METHODS}
     care_guard = CARE(use_judge=True, model=model, base_url=cfg["endpoint"], api_key="unused")
     care_guard._client = client
 
@@ -189,13 +223,14 @@ def run_llm(split, cfg, api_key, reps, cache_path, progress=print):
                     raw_response=ans, error=err, **meta)
 
     def task(name, rep, r):
-        key = (name, rep, r.command_id)
+        key = (name, rep, r.command_id, fingerprints[name])
         if (hit := cache.get(key)) is not None:
-            return hit
+            return dict(hit, from_cache=True)
         row = care_one(rep, r) if name == "CARE" else baseline_one(name, rep, r)
         if row["llm_called"]:
+            row.update(model=model, request_fingerprint=fingerprints[name])
             cache.put(row)  # only network results need caching; CARE's static path is recomputed
-        return row
+        return dict(row, from_cache=False)
 
     rows = []
     with ThreadPoolExecutor(cfg["workers"]) as ex:
@@ -211,12 +246,15 @@ def to_observations(rows, split, run_label, model, split_seed):
     obs.insert(0, "run_id", run_label + "-r" + obs.rep.astype(str))
     obs["split_seed"] = split_seed
     obs["prediction_dangerous"] = obs.decision.eq("DENY")
-    obs["model"] = obs.llm_called.map({True: model, False: None})
+    # the model recorded with each reply when it was requested; older rows without it fall back to the config
+    recorded = obs["model"] if "model" in obs else pd.Series(None, index=obs.index, dtype=object)
+    obs["model"] = recorded.where(recorded.notna(), obs.llm_called.map({True: model, False: None}))
     cols = ["run_id", "rep", "split_seed", "condition", "command_id", "source", "label", "label_dangerous",
             "decision", "prediction_dangerous", "latency_ms", "llm_called", "model", "provider",
             "generation_id", "request_utc", "api_latency_ms", "attempts", "prompt_tokens",
             "completion_tokens", "cost_usd", "finish_reason", "raw_response", "error",
-            "provisional", "score", "triggered", "fired_rules", "skip_predicate"]
+            "provisional", "score", "triggered", "fired_rules", "skip_predicate",
+            "request_fingerprint", "from_cache"]
     for c in cols:
         if c not in obs:
             obs[c] = None

@@ -242,3 +242,101 @@ the pilot-B split byte-for-byte.
 * **Verification:** the notebook was re-executed in reuse mode. All 11 Parquet tables, `observations.parquet`,
   `report.md` and both figures are **byte-identical** to those of L5/L6. In `provenance.json`, only the timestamps,
   stage timings, the test summary and `repo_head` differ.
+
+---
+
+Entries below follow the external review in L8. They are post-confirmatory. None
+changes data, prompts, model, runs or metric formulas.
+
+### D15: Design-based uncertainty (protocol v1.1 §11.1)
+* **Change:** inferential 95% CIs for F1, DR, FPR, paired differences and the
+  escalation rate now come from a bootstrap that mirrors how the split was
+  drawn:
+  * whole families are resampled within ART, NL2Bash and Real-world;
+  * commands are resampled within each RedCode scenario.
+* **Kept for paper fidelity:** the per-command Wilson, bootstrap and McNemar
+  results.
+* **Rationale:** the 149 ART commands come from 41 families, one of which has 21
+  commands. Per-command CIs assume independence and are too narrow. For
+  example, static CARE's F1 CI is [52.1, 64.9] per-command but [45.9, 69.1]
+  design-based.
+* **Evidence:** reviewer finding R2. `results/design_intervals.parquet` and
+  `design_differences.parquet`.
+* **Expected impact:** wider intervals, and paired differences that no longer
+  reach significance (C6, C10).
+* **Affects:** all verdicts (v1.1).
+
+### D16: Comparisons are descriptive; verdicts no longer treat CI inclusion as reproduction (protocol v1.1 §11.2, §11.4)
+* **Change:**
+  * every Table II comparison is marked *not directly comparable*;
+  * the `status` wording is now "reported inside/outside observed 95% CI";
+  * new verdict rules (§11.4). Numeric claims can only be *not supported (on
+    this reconstruction)* or *inconclusive (not contradicted)*.
+* **Rationale:** when an interval fails to exclude a value, that does not show
+  equivalence; the population, serving and NeMo framework all differ. This
+  is reviewer finding R3.
+* **Expected impact:** C3, C4, C5 and C8 change from *supported* to
+  *inconclusive*. C1 and C2 stay *not supported*. The v1.0 verdicts are kept in
+  `claims.parquet`.
+* **Affects:** C1–C11.
+
+### D17: Labels are corpus-level; label sensitivity for C7 and C9 (protocol v1.1 §11.3)
+* **Change:**
+  * Metrics are stated to measure agreement with corpus-level labels, the paper's
+    Table I convention.
+  * The commands on which CARE and CARE (w/o Resolution) disagree are
+    re-labelled under an explicit effect-based policy (`data/label_audit.yaml`):
+    3 commands, all judged SAFE.
+  * C7 and C9 are evaluated under both label sets.
+* **Rationale:** under corpus-level labels these 3 items alone make Resolution
+  "lose recall" (C7) and "allow dangerous commands" (C9), but their content is
+  benign:
+  * a base64 greeting round-trip (2 ART T1140 tests);
+  * an in-memory array lookup (RedCode 25_10).
+  This is reviewer finding R1.
+* **Limits:**
+  * The selection depends on the predictions.
+  * The auditor is the AI assistant that built the artifact, so the audit is not
+    blind and not independent.
+  * It is used only for a sensitivity analysis; it never replaces the primary
+    labels. A full independent audit of all 549 labels was **not** done.
+* **Expected impact:** C7 and C9 change from *not supported* to *inconclusive
+  (label-sensitive)*. Under the audited labels, CARE F1 is 57.94 and CARE (w/o R)
+  F1 is 57.41.
+* **Affects:** C7, C9.
+
+### D18: LLM cache identity and reuse provenance
+* **Change:**
+  * Cached replies are keyed by a request fingerprint: model, endpoint, provider
+    pin, fallbacks, temperature, max_tokens, and the prompt template (for CARE,
+    the SHA-256 of `care/`).
+  * Every row now records the `model` and `request_fingerprint` that were sent,
+    and whether the reply came from the cache (`from_cache`).
+  * A live run reports `cached_rows`.
+  * Reuse mode asserts that every committed reply was requested inside the live
+    run's time window and has a unique generation id.
+* **Rationale:** a cache keyed only by (condition, run, command) could attribute
+  old replies to a new model. This is reviewer finding R5.
+* **Committed run:** this does **not** affect the committed run. Its 5,001 replies
+  all fall within 06:50:35–06:52:03 UTC on 2026-11-07, with unique generation
+  ids; this is now checked on every reuse.
+* **Affects:** provenance only.
+
+### L8: External review, round 1 (Codex, gpt-6.1-sol, high effort)
+* **Review:** an independent review of PR #1 at `7ecde67` against the
+  baseline-reproduction rubric. Verdict: **REVISE**.
+* **Findings:**
+  * R1 (BLOCKER): source-derived labels drive C7 and C9 → D17.
+  * R2 (MAJOR): uncertainty ignores family clustering → D15.
+  * R3 (MAJOR): CI inclusion was used as "supported" across non-comparable
+    protocols → D16.
+  * R4 (MAJOR): the discrepancy analysis overreached ("split construction is
+    not the cause"; "not uniformly harder") → wording in §11.5, the notebook,
+    the README and the PR, now scoped to this population and recipe.
+  * R5 (MAJOR): cache identity → D18.
+  * R6 (MINOR): smoke mode without a key failed. It now reuses the smoke subset
+    of the committed full run.
+  * R7 (MINOR): the contract and protocol appeared after the results in the
+    notebook. They are now §2, before execution.
+* **What the reviewer verified:** 59 tests pass; byte-identical regeneration at
+  `7ecde67`; the paper's SHA-256 matches.
