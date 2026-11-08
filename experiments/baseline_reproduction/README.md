@@ -115,7 +115,7 @@ Earlier verdicts are kept in `results/claims.parquet` (`outcome_v1_2_rules`, `ou
 ## Reproducibility assessment
 
 * **What the evidence shows on this reconstruction.**
-  * Released CARE reaches a static F1 of 58.7 [45.5, 69.5], against 84.99 reported.
+  * Released CARE reaches a static F1 of 58.7 [45.8, 69.3], against 84.99 reported.
   * None of 100 splits drawn with this recipe exceeds 75.0.
   * On this population, even a *perfect* Resolution judge on every WARN command would raise F1 only to 60.8.
   * The misses are static ALLOWs on ART (46% DR) and RedCode (38% DR).

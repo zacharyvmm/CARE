@@ -378,4 +378,3 @@ def test_recipe_bootstrap_randomises_which_scenarios_get_the_remainder():
     sizes = np.stack([w[:, family == f].sum(1) for f in ("s1", "s2", "s3")], axis=1)
     assert (sizes.sum(1) == 7).all() and set(np.unique(sizes)) == {2, 3}
     assert all(len(set(sizes[:, k])) == 2 for k in range(3))   # each scenario sometimes gets the extra item
-
