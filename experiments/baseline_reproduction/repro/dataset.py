@@ -8,7 +8,10 @@
     Real-world commands   SAFE       30  unreleased -> data/manual/ (D4)
 
 Sampling draws whole families in seeded order, so siblings are drawn together
-or not at all (D11).  Pure functions of (seed, source roots, config).
+or not at all (D11).  The flow is explicit and stateless:
+
+    pools = load_pools(roots, real_world_file)      # every candidate, per source
+    split, manifest = build_split(pools, seed, targets)
 """
 from __future__ import annotations
 
@@ -174,28 +177,26 @@ def stratified_draw(recs, target, rng):
     return out
 
 
-_POOLS = {}
-
-
 def load_pools(roots, real_world_file, label_filter=True):
-    key = (roots["art"], roots["redcode"], roots["nl2bash"], real_world_file, label_filter)
-    if key not in _POOLS:
-        nl2bash, dropped = load_nl2bash(roots["nl2bash"], label_filter)
-        pools = dict(art=load_art(roots["art"]), redcode=load_redcode(roots["redcode"]),
-                     nl2bash=nl2bash, real=load_real_world(real_world_file))
-        # D10 -- a string present in two sources has conflicting labels; drop it everywhere.
-        seen = Counter(r["command"] for k in SOURCES for r in pools[k])
-        conflicts = sorted(c for c, n in seen.items() if n > 1)
-        for k in SOURCES:
-            pools[k] = [r for r in pools[k] if r["command"] not in set(conflicts)]
-        pools.update(nl2bash_dropped=dropped, conflicts=conflicts)
-        _POOLS[key] = pools
-    return _POOLS[key]
+    """Every candidate command per source, after label hygiene (D5) and conflict removal (D10).
+
+    Returns a dict: `art`, `redcode`, `nl2bash`, `real` (lists of records in corpus order),
+    plus `nl2bash_dropped`, `conflicts` and `label_filter` for the manifest.
+    """
+    nl2bash, dropped = load_nl2bash(roots["nl2bash"], label_filter)
+    pools = dict(art=load_art(roots["art"]), redcode=load_redcode(roots["redcode"]),
+                 nl2bash=nl2bash, real=load_real_world(real_world_file))
+    # D10 -- a string present in two sources has conflicting labels; drop it everywhere.
+    seen = Counter(r["command"] for k in SOURCES for r in pools[k])
+    conflicts = sorted(c for c, n in seen.items() if n > 1)
+    for k in SOURCES:
+        pools[k] = [r for r in pools[k] if r["command"] not in set(conflicts)]
+    return dict(pools, nl2bash_dropped=dropped, conflicts=conflicts, label_filter=label_filter)
 
 
-def build_split(seed, roots, real_world_file, targets, head_cap=12, label_filter=True):
-    """Return (DataFrame, manifest dict) for the reconstructed main split."""
-    p = load_pools(roots, real_world_file, label_filter)
+def build_split(pools, seed, targets, head_cap=12):
+    """Draw the split from the candidate pools; return (DataFrame, manifest dict)."""
+    p = pools
     rng = lambda src: random.Random(f"{seed}:{src}")  # independent stream per source  # noqa: E731
     parts = (family_draw(p["art"], targets["ART"], rng("ART"))
              + stratified_draw(p["redcode"], targets["RedCode-Exec"], rng("RedCode-Exec"))
@@ -206,7 +207,7 @@ def build_split(seed, roots, real_world_file, targets, head_cap=12, label_filter
     df = df.sort_values(["source", "command_id"], kind="stable").reset_index(drop=True)
     by = lambda s: df[df.source == s]  # noqa: E731
     manifest = dict(
-        seed=seed, label_filter=label_filter, n=len(df),
+        seed=seed, label_filter=p["label_filter"], n=len(df),
         n_dangerous=int(df.label_dangerous.sum()), n_safe=int((~df.label_dangerous).sum()),
         per_source={k: int(v) for k, v in df.source.value_counts().items()},
         candidate_pool=dict(ART=len(p["art"]), RedCode_Exec=len(p["redcode"]), NL2Bash=len(p["nl2bash"]),
@@ -241,8 +242,7 @@ def composition(df):
         multiline=("command", lambda c: int(c.str.contains("\n").sum()))).reset_index()
 
 
-def corpus_order(df, roots, real_world_file, label_filter=True):
+def corpus_order(df, pools):
     """Each command's position in its source pool: the member order `family_draw` truncates in."""
-    p = load_pools(roots, real_world_file, label_filter)
-    pos = {r["command_id"]: i for k in SOURCES for i, r in enumerate(p[k])}
+    pos = {r["command_id"]: i for k in SOURCES for i, r in enumerate(pools[k])}
     return df.command_id.map(pos).to_numpy()

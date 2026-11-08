@@ -3,21 +3,30 @@
 `baseline_reproduction.ipynb` calls these in order; reading this file top to
 bottom is reading the experiment:
 
-    run          = settings(cfg)
-    integrity    = check_environment(cfg)
-    tests        = run_unit_tests()
-    sources      = fetch_sources(cfg)
-    split, manifest = rebuild_split(cfg, sources, run)
-    smoke        = preflight(split, cfg, run)
-    static_rows  = run_static_guards(split)
-    obs, llm_run = run_llm_guards(split, static_rows, cfg, run)
-    results      = analyse(obs, split, sources, manifest, cfg, run)   # incl. design-based CIs, v1.1 verdicts
-    paths        = export(results, report_md, run)
+    run             = settings(cfg)                          # mode, LLM live or reused, output dir
+    integrity       = check_environment(cfg)                 # care/ unmodified, versions recorded
+    tests           = run_unit_tests()
+    sources         = fetch_sources(cfg)                     # corpora at pinned commits
+    pools           = load_pools(cfg, sources.roots)         # every candidate command per corpus
+    split, manifest = rebuild_split(cfg, pools, run)         # the 549 commands
+    smoke           = preflight(split, cfg, run)
+    static_rows     = run_static_guards(split)               # NoGuard, CARE (w/o Resolution)
+    obs, llm_run    = query_llm_guards(...)                  # live, or:
+                      reuse_llm_observations(...)            #   committed run, verified
+    results         = analyse(obs, split, pools, sources, cfg, run)
+    paths           = export(results, report_md, run)
     write_provenance(...)
 
 Every stage takes the data it needs as arguments and returns what it produced.
-The work itself lives in `dataset` (split), `guards` (CARE and baselines),
-`stats` (formulas) and `report` (tables, claims, figures).
+The work itself lives in
+
+    dataset      corpora -> candidate pools -> split
+    guards       CARE and the LLM-judge baselines, the pinned LLM client and its cache
+    analysis     observations -> metrics, design-based CIs, diagnostics
+    sensitivity  static CARE on re-drawn splits: seed sweep, variants, CI coverage
+    claims       verdicts C1-C11 (v1.3, with the superseded rule sets alongside)
+    stats        the formulas: metrics, Wilson, McNemar, bootstrap weights
+    report       figures, views, report.md
 """
 from __future__ import annotations
 
@@ -36,9 +45,11 @@ import numpy as np
 import pandas as pd
 
 from . import HERE, REPO
+from . import analysis as A
+from . import claims as C
 from . import dataset as D
 from . import guards as G
-from . import report as R
+from . import sensitivity as SENS
 from . import sources as SRC
 
 KEY_PACKAGES = ["pandas", "pyarrow", "numpy", "scipy", "statsmodels", "openai", "bashlex", "PyYAML", "matplotlib"]
@@ -167,16 +178,17 @@ def fetch_sources(cfg):
     return Sources(records, roots, dict(roots, art=f"{root}/atomic-red-team-2026-03-24"))
 
 
-def _build(cfg, roots, seed=None, **kw):
+def load_pools(cfg, roots, label_filter=None):
+    """Every candidate command per corpus (label filter from the config unless given)."""
     ds = cfg["dataset"]
-    return D.build_split(ds["seed"] if seed is None else seed, roots, os.path.join(HERE, ds["real_world_file"]),
-                         ds["targets"], **kw)
+    return D.load_pools(roots, os.path.join(HERE, ds["real_world_file"]),
+                        ds["nl2bash_label_filter"] if label_filter is None else label_filter)
 
 
-def rebuild_split(cfg, sources, run):
+def rebuild_split(cfg, pools, run):
     """Rebuild the seed-42 split and require it to equal the committed `data/main_split.parquet`."""
     ds = cfg["dataset"]
-    split, manifest = _build(cfg, sources.roots, head_cap=ds["nl2bash_head_cap"], label_filter=ds["nl2bash_label_filter"])
+    split, manifest = D.build_split(pools, ds["seed"], ds["targets"], ds["nl2bash_head_cap"])
     D.validate_split(split, ds["targets"])
     committed = pd.read_parquet(os.path.join(HERE, "data/main_split.parquet"))
     assert committed.equals(split[committed.columns]), "rebuilt split differs from data/main_split.parquet"
@@ -212,56 +224,64 @@ def run_static_guards(split):
     return rows
 
 
-def run_llm_guards(split, static_rows, cfg, run):
-    """CARE (with Resolution) and the three LLM-judge baselines, `run.reps` times each.
+def query_llm_guards(split, static_rows, cfg, run):
+    """CARE (with Resolution) and the three LLM-judge baselines, `run.reps` times each, queried live.
 
-    Live mode queries the LLM and writes `observations.parquet`; replies reused from the
-    cache are counted separately (`cached_rows`).  Reuse mode (no API key) reads the
-    committed full-run observations unchanged -- restricted to the smoke subset and run 1
-    in smoke mode -- and checks that (a) the static decisions just re-executed equal the
-    committed ones and (b) every committed LLM reply was requested inside the live run's
-    time window with a unique generation id (no stale replies).
+    Writes `observations.parquet` and `llm_request_identity.json` (what was requested, so that a
+    later reuse can verify it).  Replies reused from the resumability cache are counted (`cached_rows`).
     """
-    obs_path = os.path.join(run.out, "observations.parquet")
-    to_obs = lambda rows: G.to_observations(rows, split, run.label, cfg["llm"]["model"], cfg["dataset"]["seed"])  # noqa: E731
-    if run.run_llm:
-        llm_run = dict(executed=True, started_utc=_utc_now())
-        llm_rows = G.run_llm(split, cfg["llm"], run.api_key, run.reps,
-                             os.path.join(HERE, "results/cache", f"{run.label}.jsonl"))
-        llm_run["finished_utc"] = _utc_now()
-        cached = sum(bool(r.get("from_cache")) and r["llm_called"] for r in llm_rows)
-        llm_run.update(executed_in_this_session=cached < sum(r["llm_called"] for r in llm_rows), cached_rows=cached)
-        obs = to_obs(static_rows + llm_rows)
-        obs.to_parquet(obs_path, index=False)
-        identity = dict(run_label=run.label, schema="per-row request_fingerprint and from_cache (D18)",
-                        how_established="recorded at execution", executed_at_commit=_sh("git", "rev-parse", "HEAD"),
-                        executed_config=_request_config(cfg["llm"]), started_utc=llm_run["started_utc"],
-                        finished_utc=llm_run["finished_utc"],
-                        request_fingerprints={c: G.request_fingerprint(cfg["llm"], c) for c in G.LLM_METHODS})
-        json.dump(identity, open(os.path.join(run.out, "llm_request_identity.json"), "w"), indent=2)
-    else:
-        committed_path = os.path.join(HERE, "results", "observations.parquet")
-        assert os.path.exists(committed_path), "no API key and no committed observations: LLM conditions cannot be evaluated"
-        obs = pd.read_parquet(committed_path)
-        assert obs.run_id.str.startswith("confirmatory-v1").all(), "committed observations are not from this protocol's run"
-        if not run.full:  # smoke reuse: the smoke subset of the committed full run, run 1 only
-            obs = obs[obs.command_id.isin(split.command_id) & (obs.rep == 1)].reset_index(drop=True)
-            obs.to_parquet(obs_path, index=False)
-        _assert_static_matches(to_obs(static_rows), obs)
-        identity = json.load(open(os.path.join(HERE, "results", "llm_request_identity.json")))
-        _assert_same_requests(identity, obs, cfg["llm"])
-        llm_run = dict(executed=True, started_utc=identity["started_utc"], finished_utc=identity["finished_utc"])
-        _assert_replies_from_live_run(obs, llm_run)
-        llm_run.update(executed_in_this_session=False, cached_rows=0,
-                       reused_from=os.path.relpath(committed_path, HERE), replies_within_live_window=True,
-                       request_identity_verified=True, request_identity_how=identity["how_established"])
-        print("✓ static decisions identical to the committed observations; LLM observations reused (not re-queried)")
-        print("✓ requested model, serving, decoding and prompts are identical to those of the executed run "
-              f"(request fingerprints; {identity['how_established'][:40]}…)")
-        print(f"✓ all committed LLM replies were requested during the live run "
-              f"({llm_run['started_utc'][:19]} – {llm_run['finished_utc'][:19]} UTC), with unique generation ids")
-    llm_run.update(_llm_usage(obs))
-    return obs, llm_run
+    started = _utc_now()
+    llm_rows = G.run_llm(split, cfg["llm"], run.api_key, run.reps,
+                         os.path.join(HERE, "results/cache", f"{run.label}.jsonl"))
+    finished = _utc_now()
+    obs = _to_observations(static_rows + llm_rows, split, cfg, run)
+    obs.to_parquet(os.path.join(run.out, "observations.parquet"), index=False)
+    identity = dict(run_label=run.label, schema="per-row request_fingerprint and from_cache (D18)",
+                    how_established="recorded at execution", executed_at_commit=_sh("git", "rev-parse", "HEAD"),
+                    executed_config=_request_config(cfg["llm"]), started_utc=started, finished_utc=finished,
+                    request_fingerprints={c: G.request_fingerprint(cfg["llm"], c) for c in G.LLM_METHODS})
+    json.dump(identity, open(os.path.join(run.out, "llm_request_identity.json"), "w"), indent=2)
+    cached = sum(bool(r.get("from_cache")) and r["llm_called"] for r in llm_rows)
+    llm_run = dict(executed=True, started_utc=started, finished_utc=finished,
+                   executed_in_this_session=cached < sum(r["llm_called"] for r in llm_rows), cached_rows=cached)
+    return obs, dict(llm_run, **_llm_usage(obs))
+
+
+def reuse_llm_observations(split, static_rows, cfg, run):
+    """The committed observations of the live confirmatory run, verified rather than re-queried.
+
+    Checks that (a) the static decisions just re-executed equal the committed ones, (b) today's
+    requests (model, serving, decoding, prompts) are identical to the executed ones (D20), and
+    (c) every committed LLM reply was requested inside the live run's time window with a unique
+    generation id (no stale replies).  Smoke mode keeps the smoke subset and run 1.
+    """
+    committed_path = os.path.join(HERE, "results", "observations.parquet")
+    assert os.path.exists(committed_path), "no API key and no committed observations: LLM conditions cannot be evaluated"
+    obs = pd.read_parquet(committed_path)
+    assert obs.run_id.str.startswith("confirmatory-v1").all(), "committed observations are not from this protocol's run"
+    if not run.full:
+        obs = obs[obs.command_id.isin(split.command_id) & (obs.rep == 1)].reset_index(drop=True)
+        obs.to_parquet(os.path.join(run.out, "observations.parquet"), index=False)
+    identity = json.load(open(os.path.join(HERE, "results", "llm_request_identity.json")))
+    window = dict(started_utc=identity["started_utc"], finished_utc=identity["finished_utc"])
+
+    _assert_static_matches(_to_observations(static_rows, split, cfg, run), obs)
+    _assert_same_requests(identity, obs, cfg["llm"])
+    _assert_replies_from_live_run(obs, window)
+
+    print("✓ static decisions identical to the committed observations; LLM observations reused (not re-queried)")
+    print("✓ requested model, serving, decoding and prompts are identical to those of the executed run "
+          f"(request fingerprints; {identity['how_established'][:40]}…)")
+    print(f"✓ all committed LLM replies were requested during the live run "
+          f"({window['started_utc'][:19]} – {window['finished_utc'][:19]} UTC), with unique generation ids")
+    llm_run = dict(executed=True, **window, executed_in_this_session=False, cached_rows=0,
+                   reused_from=os.path.relpath(committed_path, HERE), replies_within_live_window=True,
+                   request_identity_verified=True, request_identity_how=identity["how_established"])
+    return obs, dict(llm_run, **_llm_usage(obs))
+
+
+def _to_observations(rows, split, cfg, run):
+    return G.to_observations(rows, split, run.label, cfg["llm"]["model"], cfg["dataset"]["seed"])
 
 
 REQUEST_KEYS = ("endpoint", "model", "provider_order", "allow_fallbacks", "temperature", "max_tokens")
@@ -323,56 +343,70 @@ def _utc_now():
 # ---------------------------------------------------------------- stage 4: analysis
 @dataclass
 class Results:
-    metrics: pd.DataFrame       # long format, every condition x run x metric, with per-command CIs
-    design: pd.DataFrame        # F1/DR/FPR with design-based 95% CIs (primary: recipe bootstrap, v1.2, D19)
-    design_diffs: pd.DataFrame  # paired differences with design-based 95% CIs (recipe bootstrap)
-    escalation: dict            # CARE escalation rate with design-based CI (recipe bootstrap)
-    design_v11: pd.DataFrame    # the same with the v1.1 cluster bootstrap (D15), kept for the record
-    design_diffs_v11: pd.DataFrame
-    calibration: pd.DataFrame   # bootstrap SD vs the SD over 100 re-drawn splits (static CARE, full mode)
-    coverage: pd.DataFrame | None  # simulated coverage of the bootstrap intervals (deterministic guards, full mode)
-    comparison: pd.DataFrame    # reported vs observed (Table II), descriptive
-    label_sensitivity: pd.DataFrame  # C7/C9 under corpus-level vs audited labels (D17)
-    claims: pd.DataFrame        # C1-C11: v1.3 verdicts, with the v1.2-rule, v1.1 and v1.0 verdicts alongside
-    mcnemar: pd.DataFrame       # paired tests as in the paper (Table VIII)
-    funnel: pd.DataFrame        # Resolution funnel (App. A.F)
-    oracle: pd.DataFrame        # upper bounds for any Resolution judge
+    # what each guard decided
+    metrics: pd.DataFrame          # long format, every condition x run x metric, with per-command CIs
+    # design-based inference on the primary run
+    design: A.Design               # recipe bootstrap (v1.3, D19, D22): intervals, differences, escalation
+    comparison: pd.DataFrame       # reported vs observed (Table II), descriptive
+    claims: pd.DataFrame           # C1-C11: v1.3 verdicts, with the v1.2-rule, v1.1 and v1.0 outcomes alongside
+    # diagnostics on this population
+    mcnemar: pd.DataFrame          # per-command paired tests, as in the paper (Table VIII)
+    funnel: pd.DataFrame           # Resolution funnel (App. A.F)
+    oracle: pd.DataFrame           # upper bounds for any Resolution judge
     by_source: pd.DataFrame
     redcode: pd.DataFrame
-    seeds: pd.DataFrame | None     # static F1 over alternative split seeds (full mode only)
-    variants: pd.DataFrame | None  # construction variants V0-V3 (full mode only)
+    label_sensitivity: pd.DataFrame  # C7/C9 under corpus-level vs audited labels (D17)
+    # split construction (static CARE on re-drawn splits; full mode only, else None)
+    seeds: pd.DataFrame | None     # seed sweep
+    variants: pd.DataFrame | None  # construction variants V0-V3
+    coverage: pd.DataFrame | None  # simulated coverage of the bootstrap intervals (D22)
+    calibration: pd.DataFrame | None  # bootstrap spread vs spread over re-drawn splits (D19)
+    # superseded, kept for the record
+    design_v11: A.Design           # v1.1 cluster bootstrap (D15)
 
 
-def analyse(obs, split, sources, manifest, cfg, run):
-    metrics = R.metrics_long(obs, split, cfg, split_name=run.split_name)
-    order = _corpus_order(split, cfg, sources.roots)
-    design, design_diffs, escalation = R.design_bootstrap(obs, split, cfg, estimator="recipe", order=order)
-    design_v11, design_diffs_v11, escalation_v11 = R.design_bootstrap(obs, split, cfg, estimator="cluster")
-    comparison = R.comparison(metrics, cfg, design)
-    mcnemar = R.mcnemar_table(obs, split, cfg)
-    funnel = R.funnel(obs, split)
-    label_sens = R.label_sensitivity(obs, split, load_label_audit())
-    redcode, redcode_items = R.redcode_scenarios(obs, split)
-    seeds = variants = coverage = None
+def analyse(obs, split, pools, sources, cfg, run):
+    """Every analysis table (§6-§8), from the observations, the split and the corpora."""
+    # 1. What each guard decided: point metrics per condition and run
+    metrics = A.metrics_long(obs, split, cfg, split_name=run.split_name)
+
+    # 2. Design-based uncertainty: re-run the split recipe on the sample (v1.3)
+    weights = A.recipe_weights(split, cfg, order=D.corpus_order(split, pools))
+    design = A.design_inference(obs, split, weights, "recipe", cfg)
+    design_v11 = A.design_inference(obs, split, A.cluster_weights(split, cfg), "cluster", cfg)   # superseded
+
+    # 3. Reported vs observed, and the paper's own per-command tests
+    comparison = A.compare_with_paper(metrics, design.intervals, cfg)
+    mcnemar = A.mcnemar_table(obs, split, cfg)
+
+    # 4. Diagnostics on this population
+    funnel = A.resolution_funnel(obs, split)
+    oracle = A.oracle_bounds(obs, split)
+    by_source = A.by_source(obs, split)
+    redcode, redcode_items = A.redcode_scenarios(obs, split)
+    label_sens = A.label_sensitivity(obs, split, load_label_audit())
+
+    # 5. Split construction: static CARE on re-drawn splits (deterministic, full mode only)
+    seeds = variants = coverage = calibration = None
     if run.full:
-        seeds, variants, coverage = split_sensitivity(split, redcode_items, sources, manifest, cfg)
-    common = (comparison, mcnemar, funnel, metrics, seeds)
-    claims = R.claims(*common, design, design_diffs, escalation, label_sens, cfg, version="1.3")
-    claims_v12 = R.claims(*common, design, design_diffs, escalation, label_sens, cfg, version="1.2")
-    claims_v11 = R.claims(*common, design_v11, design_diffs_v11, escalation_v11, label_sens, cfg, version="1.1")
-    claims.insert(claims.columns.get_loc("outcome_v1_0"), "outcome_v1_2_rules", claims_v12.outcome)
-    claims.insert(claims.columns.get_loc("outcome_v1_0"), "outcome_v1_1", claims_v11.outcome)
-    calibration = R.bootstrap_calibration(pd.concat([design, design_v11]), seeds) if seeds is not None else None
-    return Results(metrics=metrics, design=design, design_diffs=design_diffs, escalation=escalation,
-                   design_v11=design_v11, design_diffs_v11=design_diffs_v11, calibration=calibration, coverage=coverage,
-                   comparison=comparison, label_sensitivity=label_sens, claims=claims, mcnemar=mcnemar,
-                   funnel=funnel, oracle=R.oracle_bounds(obs, split), by_source=R.by_source(obs, split),
-                   redcode=redcode, seeds=seeds, variants=variants)
+        care = SENS.StaticCARE()
+        seeds = SENS.seed_sweep(pools, cfg, care)
+        variants = SENS.construction_variants(split, redcode_items, pools,
+                                              pools_unfiltered=load_pools(cfg, sources.roots, label_filter=False),
+                                              pools_v3=load_pools(cfg, sources.roots_v3), cfg=cfg, care=care)
+        coverage = SENS.bootstrap_coverage(pools, cfg, care)
+        calibration = SENS.bootstrap_calibration(pd.concat([design.intervals, design_v11.intervals]), seeds)
 
+    # 6. Claim verdicts: v1.3, with the superseded rule sets alongside
+    claims = C.claims_table(
+        v1_3=C.verdicts(design, label_sens, metrics, seeds, cfg),
+        v1_2=C.verdicts_v1_2(design, label_sens, metrics, seeds, cfg),
+        v1_1=C.verdicts_v1_1(design_v11, label_sens, metrics, seeds, cfg),
+        v1_0=C.verdicts_v1_0(comparison, mcnemar, funnel, metrics, seeds, cfg))
 
-def _corpus_order(split, cfg, roots):
-    ds = cfg["dataset"]
-    return D.corpus_order(split, roots, os.path.join(HERE, ds["real_world_file"]), ds["nl2bash_label_filter"])
+    return Results(metrics=metrics, design=design, comparison=comparison, claims=claims, mcnemar=mcnemar,
+                   funnel=funnel, oracle=oracle, by_source=by_source, redcode=redcode, label_sensitivity=label_sens,
+                   seeds=seeds, variants=variants, coverage=coverage, calibration=calibration, design_v11=design_v11)
 
 
 def load_label_audit():
@@ -380,31 +414,6 @@ def load_label_audit():
     import yaml
     with open(os.path.join(HERE, "data", "label_audit.yaml"), encoding="utf-8") as f:
         return {i["command_id"]: i["audited_label"] for i in yaml.safe_load(f)["items"]}
-
-
-def split_sensitivity(split, redcode_items, sources, manifest, cfg):
-    """Static CARE on alternative splits (deterministic, no LLM): 100 seeds, variants V1-V3, and the
-    simulated coverage of the bootstrap intervals (D22)."""
-    cache = {}
-    first, last = cfg["analysis"]["sensitivity_seeds"]
-    seeds = pd.DataFrame([dict(seed=s, **R.static_eval(_build(cfg, sources.roots, seed=s)[0], cache))
-                          for s in range(first, last + 1)])
-    v1 = _build(cfg, sources.roots, seed=42, label_filter=False)[0]
-    v3, manifest_v3 = _build(cfg, sources.roots_v3, seed=42)
-    weak = split.command_id.isin(redcode_items[redcode_items.kind == "software-weakness"].command_id)
-    no_redcode = split.source != "RedCode-Exec"
-    art_pools = f"pool {manifest_v3['candidate_pool']['ART']} vs {manifest['candidate_pool']['ART']}"
-    variants = pd.DataFrame([
-        dict(variant="V0 primary", note="seed 42, as protocol", n=len(split), **R.static_eval(split, cache)),
-        dict(variant="V1", note="NL2Bash label filter off (D5)", n=len(v1), **R.static_eval(v1, cache)),
-        dict(variant="V2 (exploratory, post hoc)", note="RedCode software-weakness scenarios removed (D9)",
-             n=int((~weak).sum()), **R.static_eval(split[~weak], cache)),
-        dict(variant="V2b", note="RedCode removed", n=int(no_redcode.sum()), **R.static_eval(split[no_redcode], cache)),
-        dict(variant="V3", note=f"ART snapshot 2026-03-24 ({art_pools})", n=len(v3), **R.static_eval(v3, cache)),
-    ])
-    coverage = R.bootstrap_coverage(build=lambda s: _build(cfg, sources.roots, seed=s)[0],
-                                    order_of=lambda sp: _corpus_order(sp, cfg, sources.roots), care_cache=cache, cfg=cfg)
-    return seeds, variants, coverage
 
 
 # ---------------------------------------------------------------- stage 5: export
@@ -420,8 +429,9 @@ def export(results, report_md, run):
              save(r.metrics.assign(experiment="main"), "metrics.parquet"),
              save(r.comparison, "comparison.parquet"),
              save(r.claims, "claims.parquet"),
-             save(pd.concat([r.design, r.design_v11], ignore_index=True), "design_intervals.parquet"),
-             save(pd.concat([r.design_diffs, r.design_diffs_v11], ignore_index=True), "design_differences.parquet"),
+             save(pd.concat([r.design.intervals, r.design_v11.intervals], ignore_index=True), "design_intervals.parquet"),
+             save(pd.concat([r.design.differences, r.design_v11.differences], ignore_index=True),
+                  "design_differences.parquet"),
              save(r.label_sensitivity, "label_sensitivity.parquet"),
              save(r.mcnemar, "mcnemar.parquet"),
              save(r.funnel, "resolution_funnel.parquet"),

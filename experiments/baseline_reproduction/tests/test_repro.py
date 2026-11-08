@@ -196,19 +196,18 @@ def mini_corpus(tmp_path):
 def test_build_split_end_to_end(mini_corpus):
     roots, rw = mini_corpus
     targets = {"ART": 4, "RedCode-Exec": 4, "NL2Bash": 5, "Real-world": 2}
-    df, man = D.build_split(7, roots, rw, targets)
+    df, man = D.build_split(D.load_pools(roots, rw), 7, targets)
     assert D.validate_split(df, targets)
     assert man["candidate_pool"]["NL2Bash_label_filtered_out"] == 1          # "sudo reboot"
     assert man["candidate_pool"]["cross_source_conflicts_dropped"] == ["echo v 0"]   # ART vs NL2Bash (D10)
     assert set(df[df.source == "ART"].command) <= {f"echo v {i}" for i in range(6)}   # args substituted
     assert not df.command.str.contains("#!").any()                                    # shebang stripped
-    df2, _ = D.build_split(7, roots, rw, targets)
+    df2, _ = D.build_split(D.load_pools(roots, rw), 7, targets)
     assert df.command_id.tolist() == df2.command_id.tolist()                          # deterministic
 
 
 def test_conflicting_labels_dropped(mini_corpus):
     roots, rw = mini_corpus
-    D._POOLS.clear()
     p = D.load_pools(roots, rw)
     assert "echo v 0" in p["conflicts"]          # in ART (DANGEROUS) and NL2Bash (SAFE)
     assert all(r["command"] != "echo v 0" for k in D.SOURCES for r in p[k])

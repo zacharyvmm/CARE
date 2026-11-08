@@ -22,7 +22,7 @@ the same order.
 | Targets | Table II (6 of 12 rows), Table VIII (McNemar), App. A.F (Resolution funnel), Sec. V-A1. Claims C1–C11 |
 | Classification | *Partial reproduction* for CARE (author code, run unmodified). *Replication* for the data: the split is reconstructed because the authors' split is unreleased. *Reimplementation* for the LLM-judge baselines (verbatim App. E prompts) |
 | Protocol | [`PROTOCOL.md`](PROTOCOL.md). v1.0 was frozen in commit `de2bc54` before the confirmatory run; the v1.1–v1.3 amendments (§11–§13) were written after the results and external review. **Not blind:** a pilot came first |
-| Decisions | [`DECISIONS.md`](DECISIONS.md), append-only: D1–D23, L1–L10 |
+| Decisions | [`DECISIONS.md`](DECISIONS.md), append-only: D1–D23, L1–L11 |
 
 ## Results (primary run = run 1 of 3; descriptive comparison)
 
@@ -146,9 +146,10 @@ Earlier verdicts are kept in `results/claims.parquet` (`outcome_v1_2_rules`, `ou
 
 * Evaluate the new method on `data/main_split.parquet`, using the same `command_id`s and corpus-level labels.
 * Compare against the observed rows here (`results/observations.parquet`), not the paper's numbers. Use paired,
-  design-based differences from the recipe bootstrap: `report.design_bootstrap(..., estimator="recipe",
-  order=dataset.corpus_order(...))`, which uses `stats.recipe_bootstrap_weights` and `weighted_rates`. Comparing
-  against several baselines needs a multiplicity adjustment, as for C10.
+  design-based differences from the recipe bootstrap:
+  `w = analysis.recipe_weights(split, cfg, order=dataset.corpus_order(split, pools))`, then
+  `analysis.paired_differences(obs, split, w, "recipe", cfg)`; these build on `stats.recipe_bootstrap_weights` and
+  `weighted_rates`. Comparing against several baselines needs a multiplicity adjustment, as for C10.
 * See PROTOCOL §10–§13. Use Python 3.12; the lockfile requires at least 3.12.
 
 ## Artifact inventory
@@ -157,7 +158,7 @@ Earlier verdicts are kept in `results/claims.parquet` (`outcome_v1_2_rules`, `ou
 |---|---|
 | `baseline_reproduction.ipynb` | executable narrative, executed in reuse mode. The live LLM execution is `results/executed/confirmatory_live_run.ipynb` |
 | `PROTOCOL.md`, `DECISIONS.md`, `config.yaml` | protocol (v1.0 plus the v1.1–v1.3 amendments), append-only log, configuration (pins, fingerprints, reported values) |
-| `repro/` | `pipeline` (one function per notebook stage, in execution order; start here), `sources` (pinned sparse fetch, fingerprints), `dataset` (split reconstruction), `guards` (CARE + baselines, provider-pinned client, fingerprinted cache), `stats` (metric formulas, design-based bootstrap), `report` (tables, claims, figures, views) |
+| `repro/` | `pipeline` (one function per notebook stage, in execution order; start here), `sources` (pinned sparse fetch, fingerprints), `dataset` (corpora → candidate pools → split), `guards` (CARE + baselines, provider-pinned client, fingerprinted cache), `analysis` (metrics, design-based CIs, diagnostics), `sensitivity` (static CARE on re-drawn splits, CI coverage), `claims` (verdicts, v1.3 and superseded), `stats` (formulas, bootstrap weights), `report` (figures, views, report.md) |
 | `tests/test_repro.py` | 61 unit tests: metrics vs statsmodels, recipe and cluster bootstraps, parsing, cache identity, reuse gating and reply freshness, CARE fail-closed path, sampling, end-to-end split, settings (the API key never appears in output). The notebook also runs the repo's 10 CARE tests |
 | `environment/requirements.lock.txt` | exact package versions |
 | `data/main_split.parquet`, `data/NOTICE.md` | the 549-command split and the corpus licenses (ART MIT, RedCode CC BY 4.0, NL2Bash MIT) |

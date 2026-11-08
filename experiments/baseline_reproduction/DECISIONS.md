@@ -487,3 +487,27 @@ changes data, prompts, model, runs or metric formulas.
   inferential uncertainty. Following the review-loop guard, the estimator was
   completed against the recipe and validated by simulation, rather than patched
   case by case.
+
+### L11: Code-structure refactor for readability (non-methodological)
+* **Date:** 2026-11-08, after L10.
+* **Change:**
+  * `repro/report.py` (767 lines) held six jobs. It is split by responsibility: `analysis.py` (observations →
+    metrics, design-based CIs, diagnostics), `sensitivity.py` (static CARE on re-drawn splits, CI coverage),
+    `claims.py` (verdicts) and `report.py` (figures, views and `report.md` only).
+  * `claims.py`: each claim is one function that returns (outcome, rationale). The v1.3 rules read straight
+    through. Each superseded rule set is written as "v1.3 except these claims" (v1.2: C10; v1.1: cluster
+    bootstrap, C6 and C10), replacing the `version` branches inside one 11-argument function.
+  * `design_bootstrap` (weights built inside, a 3-tuple returned) is replaced by `recipe_weights` /
+    `cluster_weights` and `design_intervals`, `paired_differences` and `escalation_rate`, which take the weight
+    matrix explicitly. They are bundled per estimator as an `analysis.Design`.
+  * `dataset.py` no longer caches pools in a module global (`_POOLS`): `load_pools` then `build_split(pools, …)`.
+    The CARE memo for the sensitivity studies is a small class (`StaticCARE`) rather than a dict with a `"_guard"` key.
+  * `pipeline.run_llm_guards` is split into `query_llm_guards` (live) and `reuse_llm_observations` (verified
+    reuse); the notebook shows the branch. `pipeline.analyse` reads as six numbered steps.
+* **Unchanged:** data, prompts, model, parsing, metric formulas, bootstrap code (`stats.py`), claim rules,
+  rationale strings and every output.
+* **Verification:** the notebook was re-executed in reuse mode, before and after the change. All 16 Parquet
+  tables (including `observations.parquet` and `claims.parquet`), `report.md`, `llm_request_identity.json` and
+  both figures are **byte-identical** to the committed ones, and so are the output checksums in
+  `provenance.json`. Smoke mode passed, and the live path was exercised with a stubbed LLM client. All 61 tests and
+  CARE's 10 pass; two tests were updated for the new `build_split` signature.
