@@ -1,11 +1,11 @@
 {
-  "generated_utc": "2026-11-08T00:53:43.496127+00:00",
+  "generated_utc": "2026-11-08T02:05:23.844332+00:00",
   "mode": "full",
   "run_label": "confirmatory-v1",
-  "protocol_version": "1.2",
-  "protocol_sha256": "c4ee5142d68e7e9be95f8c3c7095914083c4e95aea30d665d0bf593800ba0d64",
-  "config_sha256": "f349e3114152ab6b50f74d5e2de7b7b207c3397ce26394a1fe565180c571ba9f",
-  "repo_head": "e365f10d249e1cd91e64527006aa96aca20c9653",
+  "protocol_version": "1.3",
+  "protocol_sha256": "aa5058077c0f48def5f44f780bfd2943c5aa1f036830dd64522eeaf4085ac3f9",
+  "config_sha256": "1b6a22e5ed1603535cc40c5e87fe6eb83033a6335cee12147d74434d46539b8d",
+  "repo_head": "1f32fd63bcb3ef212535379c5f481cc7a97578a3",
   "method_under_test": {
     "repository": "https://github.com/prisma-research/CARE (this repo, fork zacharyvmm/CARE)",
     "commit": "9d6852e2ee79ec0ac1d6579dcfb8da0b0be5b2c2",
@@ -175,25 +175,25 @@
   },
   "unit_tests": {
     "returncode": 0,
-    "summary": "69 passed in 1.77s"
+    "summary": "71 passed in 1.61s"
   },
   "smoke_check": {
     "static_rows": 48
   },
   "stage_seconds": {
-    "unit_tests_s": 2.34,
-    "sources_s": 0.06,
-    "static_s": 2.56,
-    "llm_s": 0.05,
-    "analysis_s": 38.39
+    "unit_tests_s": 2.05,
+    "sources_s": 0.05,
+    "static_s": 1.77,
+    "llm_s": 0.04,
+    "analysis_s": 181.58
   },
   "outputs": {
     "results/observations.parquet": "8125550566128f2d6e8743a860e4ab143c35e1ede6f66b9e0bee92baf370abe1",
     "results/metrics.parquet": "04feb0e057cdc331d9ac1dd8dcc812eb106d26d86d7197f0ddc82e735b232778",
-    "results/comparison.parquet": "19a5064370a1f7a53e206a9e04fd789610f42e2547465b4f2c0f1fbaa4a8d48a",
-    "results/claims.parquet": "039b482dbf4f06b37218a36eae333da9c99a3cbc6ac41bed11b51326aa5e6f1a",
-    "results/design_intervals.parquet": "8af97cea160913a471f74aa01278f6fc041c8fdd93748d5f7df631a5ffa2221f",
-    "results/design_differences.parquet": "c7d17364727ebb7e4e39580c793d038281602740e8e75c7e9a0ec680f062bda8",
+    "results/comparison.parquet": "87a45ca86fca75c5a847fc05292cfcafa3587a5ca5e5a82d8b4feb9fb861dd4f",
+    "results/claims.parquet": "669ebcc23c203d49e23d044cb9544da90c811d9b57806b12a1e40dd5b595d274",
+    "results/design_intervals.parquet": "6b87f5e2146a71cdd0747d6448e22a091fc7e9ef4ac9cbd24a06328cf01cd82b",
+    "results/design_differences.parquet": "58ff4b71dabc9e01bd60f0b2a4cbcc821959844b25d7c9b777bd0de37559badd",
     "results/label_sensitivity.parquet": "df77a3ec8512a16be659297457ec735e97d9d0396dbbc5185f5bc436c6b42472",
     "results/mcnemar.parquet": "3a6b96528f3266bda87f0f42c63a0e0b7f7d9f30b5d25b89194c74afc0b49600",
     "results/resolution_funnel.parquet": "e666cdd727903872988cd443fb4eda5bda53d3965c95a3e80ba7e16d99040c97",
@@ -202,6 +202,7 @@
     "results/redcode_scenarios.parquet": "e1c9198dbe7e7d3fec4b5c4bacde4490ebb85fcfa20e4e167456c79c7daf613c",
     "results/sensitivity_seeds.parquet": "0171e15d88b14ca97d53d857d24fc2a04a768e4b73fa3b23cc81bf24c739f268",
     "results/sensitivity_variants.parquet": "f0e99eeac3d593149ecbc3c81bb19705fd02a53db5271e3f7cf39205c2cc69f7",
-    "results/bootstrap_calibration.parquet": "c9a98c18af871d65bf2fb1a6830addd80a22b74e5fe8474a23911deda6e29ef2"
+    "results/bootstrap_calibration.parquet": "aa197553bfff5d73f95676e33fe47d41ebf0bf1044966e3305edde0979a50ec1",
+    "results/bootstrap_coverage.parquet": "6a097e166bb96697aa164b4b4c9fde96f97d76f645f10fc9e029d8581c89d2b9"
   }
 }

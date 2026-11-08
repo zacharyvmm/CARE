@@ -329,10 +329,11 @@ class Results:
     escalation: dict            # CARE escalation rate with design-based CI (recipe bootstrap)
     design_v11: pd.DataFrame    # the same with the v1.1 cluster bootstrap (D15), kept for the record
     design_diffs_v11: pd.DataFrame
-    calibration: pd.DataFrame   # bootstraps vs the recipe's true sampling distribution (static CARE, full mode)
+    calibration: pd.DataFrame   # bootstrap SD vs the SD over 100 re-drawn splits (static CARE, full mode)
+    coverage: pd.DataFrame | None  # simulated coverage of the bootstrap intervals (deterministic guards, full mode)
     comparison: pd.DataFrame    # reported vs observed (Table II), descriptive
     label_sensitivity: pd.DataFrame  # C7/C9 under corpus-level vs audited labels (D17)
-    claims: pd.DataFrame        # C1-C11: v1.2 verdicts, with the v1.1 and v1.0 verdicts alongside
+    claims: pd.DataFrame        # C1-C11: v1.3 verdicts, with the v1.2-rule, v1.1 and v1.0 verdicts alongside
     mcnemar: pd.DataFrame       # paired tests as in the paper (Table VIII)
     funnel: pd.DataFrame        # Resolution funnel (App. A.F)
     oracle: pd.DataFrame        # upper bounds for any Resolution judge
@@ -344,26 +345,34 @@ class Results:
 
 def analyse(obs, split, sources, manifest, cfg, run):
     metrics = R.metrics_long(obs, split, cfg, split_name=run.split_name)
-    design, design_diffs, escalation = R.design_bootstrap(obs, split, cfg, estimator="recipe")
+    order = _corpus_order(split, cfg, sources.roots)
+    design, design_diffs, escalation = R.design_bootstrap(obs, split, cfg, estimator="recipe", order=order)
     design_v11, design_diffs_v11, escalation_v11 = R.design_bootstrap(obs, split, cfg, estimator="cluster")
     comparison = R.comparison(metrics, cfg, design)
     mcnemar = R.mcnemar_table(obs, split, cfg)
     funnel = R.funnel(obs, split)
     label_sens = R.label_sensitivity(obs, split, load_label_audit())
     redcode, redcode_items = R.redcode_scenarios(obs, split)
-    seeds = variants = None
+    seeds = variants = coverage = None
     if run.full:
-        seeds, variants = split_sensitivity(split, redcode_items, sources, manifest, cfg)
+        seeds, variants, coverage = split_sensitivity(split, redcode_items, sources, manifest, cfg)
     common = (comparison, mcnemar, funnel, metrics, seeds)
-    claims = R.claims(*common, design, design_diffs, escalation, label_sens, cfg, version="1.2")
+    claims = R.claims(*common, design, design_diffs, escalation, label_sens, cfg, version="1.3")
+    claims_v12 = R.claims(*common, design, design_diffs, escalation, label_sens, cfg, version="1.2")
     claims_v11 = R.claims(*common, design_v11, design_diffs_v11, escalation_v11, label_sens, cfg, version="1.1")
+    claims.insert(claims.columns.get_loc("outcome_v1_0"), "outcome_v1_2_rules", claims_v12.outcome)
     claims.insert(claims.columns.get_loc("outcome_v1_0"), "outcome_v1_1", claims_v11.outcome)
     calibration = R.bootstrap_calibration(pd.concat([design, design_v11]), seeds) if seeds is not None else None
     return Results(metrics=metrics, design=design, design_diffs=design_diffs, escalation=escalation,
-                   design_v11=design_v11, design_diffs_v11=design_diffs_v11, calibration=calibration,
+                   design_v11=design_v11, design_diffs_v11=design_diffs_v11, calibration=calibration, coverage=coverage,
                    comparison=comparison, label_sensitivity=label_sens, claims=claims, mcnemar=mcnemar,
                    funnel=funnel, oracle=R.oracle_bounds(obs, split), by_source=R.by_source(obs, split),
                    redcode=redcode, seeds=seeds, variants=variants)
+
+
+def _corpus_order(split, cfg, roots):
+    ds = cfg["dataset"]
+    return D.corpus_order(split, roots, os.path.join(HERE, ds["real_world_file"]), ds["nl2bash_label_filter"])
 
 
 def load_label_audit():
@@ -374,7 +383,8 @@ def load_label_audit():
 
 
 def split_sensitivity(split, redcode_items, sources, manifest, cfg):
-    """Static CARE F1 on alternative splits (deterministic, no LLM): 100 seeds and variants V1-V3."""
+    """Static CARE on alternative splits (deterministic, no LLM): 100 seeds, variants V1-V3, and the
+    simulated coverage of the bootstrap intervals (D22)."""
     cache = {}
     first, last = cfg["analysis"]["sensitivity_seeds"]
     seeds = pd.DataFrame([dict(seed=s, **R.static_eval(_build(cfg, sources.roots, seed=s)[0], cache))
@@ -392,7 +402,9 @@ def split_sensitivity(split, redcode_items, sources, manifest, cfg):
         dict(variant="V2b", note="RedCode removed", n=int(no_redcode.sum()), **R.static_eval(split[no_redcode], cache)),
         dict(variant="V3", note=f"ART snapshot 2026-03-24 ({art_pools})", n=len(v3), **R.static_eval(v3, cache)),
     ])
-    return seeds, variants
+    coverage = R.bootstrap_coverage(build=lambda s: _build(cfg, sources.roots, seed=s)[0],
+                                    order_of=lambda sp: _corpus_order(sp, cfg, sources.roots), care_cache=cache, cfg=cfg)
+    return seeds, variants, coverage
 
 
 # ---------------------------------------------------------------- stage 5: export
@@ -418,7 +430,7 @@ def export(results, report_md, run):
              save(r.redcode, "redcode_scenarios.parquet")]
     if r.seeds is not None:
         paths += [save(r.seeds, "sensitivity_seeds.parquet"), save(r.variants, "sensitivity_variants.parquet"),
-                  save(r.calibration, "bootstrap_calibration.parquet")]
+                  save(r.calibration, "bootstrap_calibration.parquet"), save(r.coverage, "bootstrap_coverage.parquet")]
     with open(os.path.join(run.out, "report.md"), "w") as f:
         f.write(report_md)
     return paths

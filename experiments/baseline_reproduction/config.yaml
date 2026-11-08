@@ -1,6 +1,6 @@
 # Frozen configuration for the CARE baseline reproduction (protocol v1.0, see PROTOCOL.md).
 # Changing anything here after the confirmatory run requires a DECISIONS.md entry.
-protocol_version: "1.2"   # v1.1 = PROTOCOL.md §11, v1.2 = §12 (post-confirmatory amendments after external review; D15-D21)
+protocol_version: "1.3"   # v1.1-v1.3 = PROTOCOL.md §11-§13 (post-confirmatory amendments after external review; D15-D23)
 
 paper:
   title: "CARE: Pre-Execution Command Verification for Shell-Executing LLM Agents"
@@ -67,7 +67,8 @@ analysis:
   bootstrap_seed: 0
   ci_level: 0.95
   sensitivity_seeds: [0, 99]             # inclusive range, static guard only
-  inferential_ci: "recipe bootstrap (PROTOCOL.md §12.1, D19); v1.1 cluster bootstrap (§11.1, D15) kept for the record"
+  inferential_ci: "recipe bootstrap (PROTOCOL.md §12.1 as amended by §13.1, D19, D22); v1.1 cluster bootstrap (§11.1, D15) kept for the record"
+  coverage: {eval_seeds: [0, 99], truth_seeds: [1000, 1199], resamples: 1000}   # §13.2, D22: simulated CI coverage, deterministic guards
   label_audit: "data/label_audit.yaml"   # D17: sensitivity analysis for C7/C9 only
 
 smoke:

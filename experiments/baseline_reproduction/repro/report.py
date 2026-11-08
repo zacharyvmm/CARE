@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import numpy as np
 import pandas as pd
@@ -134,35 +135,38 @@ DESIGN_PAIRS = [("CARE (w/o Resolution)", "PromptOnly"), ("CARE (w/o Resolution)
                 ("CARE (w/o Resolution)", "NeMo self-check"), ("CARE", "LLMJudge"),
                 ("CARE", "CARE (w/o Resolution)")]
 ESTIMATORS = {
-    "recipe": "recipe bootstrap: re-runs the split recipe on the sample (fixed source quotas, families until quota, "
-              "NL2Bash head cap, RedCode within scenario, Real-world fixed) (v1.2, D19)",
+    "recipe": "recipe bootstrap: re-runs the split recipe on the sample (fixed source quotas, families in corpus order "
+              "until quota, NL2Bash head cap, random RedCode remainder, Real-world fixed) (v1.3, D19, D22)",
     "cluster": "cluster bootstrap: families resampled within source, RedCode items within scenario (v1.1, D15)",
 }
 
 
-def _bootstrap_weights(split, cfg, estimator):
+def _bootstrap_weights(split, cfg, estimator, order=None, n_boot=None, seed=None):
     a = cfg["analysis"]
+    n_boot = a["bootstrap_resamples"] if n_boot is None else n_boot
+    seed = a["bootstrap_seed"] if seed is None else seed
     fam = np.where(split.source.eq("RedCode-Exec"), split.family, split.source + ":" + split.family)
     if estimator == "cluster":
-        return S.cluster_bootstrap_weights(split.source.to_numpy(), fam, a["bootstrap_resamples"], a["bootstrap_seed"])
+        return S.cluster_bootstrap_weights(split.source.to_numpy(), fam, n_boot, seed)
     quotas = split.source.value_counts().to_dict()
-    return S.recipe_bootstrap_weights(split.source.to_numpy(), fam, split["head"].to_numpy(), quotas,
-                                      a["bootstrap_resamples"], a["bootstrap_seed"],
-                                      head_cap=cfg["dataset"]["nl2bash_head_cap"])
+    return S.recipe_bootstrap_weights(split.source.to_numpy(), fam, split["head"].to_numpy(), quotas, n_boot, seed,
+                                      head_cap=cfg["dataset"]["nl2bash_head_cap"], order=order)
 
 
-def design_bootstrap(obs, split, cfg, rep=1, estimator="recipe"):
-    """Paired design-based bootstrap on the primary run (`estimator`: "recipe" = v1.2, "cluster" = v1.1).
+def design_bootstrap(obs, split, cfg, rep=1, estimator="recipe", order=None):
+    """Paired design-based bootstrap on the primary run (`estimator`: "recipe" = v1.3, "cluster" = v1.1).
 
     Returns (intervals, differences, escalation):
       intervals   -- F1/DR/FPR per condition with 95% percentile CIs;
-      differences -- paired differences (left - right) in F1 and accuracy for DESIGN_PAIRS
-                     and for every condition against the best non-CARE condition;
+      differences -- paired differences (left - right) in F1 and accuracy for DESIGN_PAIRS and for
+                     every non-CARE condition against every CARE variant; the latter also carry
+                     Bonferroni-adjusted CIs over the non-CARE comparators (C10, D23);
       escalation  -- CARE's escalation rate with its 95% CI.
+    `order` gives each command's position in its corpus (truncation order of `family_draw`).
     """
     a = cfg["analysis"]
     ids, y = split.command_id.to_numpy(), split.label_dangerous.to_numpy(bool)
-    w = _bootstrap_weights(split, cfg, estimator)
+    w = _bootstrap_weights(split, cfg, estimator, order=order)
     method = ESTIMATORS[estimator]
     conds = [c for c in conditions_in(obs) if c != "NoGuard"]
     boot = {c: S.weighted_rates(w, y, preds(obs, ids, c, rep)[0]) for c in conds}
@@ -175,8 +179,10 @@ def design_bootstrap(obs, split, cfg, rep=1, estimator="recipe"):
                              ci_lo=100 * lo, ci_hi=100 * hi, boot_sd=100 * float(np.nanstd(boot[c][key])),
                              ci_method=method))
     point_f1 = {c: 100 * S.point_metrics(y, preds(obs, ids, c, rep)[0])["f1"] for c in conds}
-    best_other = max((c for c in conds if not c.startswith("CARE")), key=point_f1.get)
-    pairs = DESIGN_PAIRS + [(best_other, c) for c in conds if c.startswith("CARE")]
+    others = [c for c in conds if not c.startswith("CARE")]
+    versus_care = [(o, c) for c in conds if c.startswith("CARE") for o in others]
+    pairs = list(dict.fromkeys(DESIGN_PAIRS + versus_care))
+    adj_level = 1 - (1 - a["ci_level"]) / max(len(others), 1)
     diffs = []
     for left, right in pairs:
         if left not in boot or right not in boot:
@@ -184,9 +190,12 @@ def design_bootstrap(obs, split, cfg, rep=1, estimator="recipe"):
         pl, pr = preds(obs, ids, left, rep)[0], preds(obs, ids, right, rep)[0]
         for key, name, point in [("f1", "F1", point_f1[left] - point_f1[right]),
                                  ("acc", "accuracy", 100 * ((pl == y).mean() - (pr == y).mean()))]:
-            lo, hi = S.percentile_ci(100 * (boot[left][key] - boot[right][key]), a["ci_level"])
+            delta = 100 * (boot[left][key] - boot[right][key])
+            lo, hi = S.percentile_ci(delta, a["ci_level"])
+            alo, ahi = S.percentile_ci(delta, adj_level) if (left, right) in versus_care else (np.nan, np.nan)
             diffs.append(dict(estimator=estimator, left=left, right=right, metric=f"delta_{name}", value=point,
-                              ci_lo=lo, ci_hi=hi, excludes_zero=bool(lo > 0 or hi < 0), ci_method=method))
+                              ci_lo=lo, ci_hi=hi, excludes_zero=bool(lo > 0 or hi < 0),
+                              adj_ci_lo=alo, adj_ci_hi=ahi, ci_method=method))
     esc = obs[(obs.condition == "CARE") & (obs.rep == rep)].set_index("command_id").loc[ids].llm_called.to_numpy(bool)
     rate = (w @ esc) / w.sum(1)
     lo, hi = S.percentile_ci(rate, a["ci_level"])
@@ -195,12 +204,13 @@ def design_bootstrap(obs, split, cfg, rep=1, estimator="recipe"):
 
 
 def bootstrap_calibration(design, seeds, condition="CARE (w/o Resolution)"):
-    """Check the bootstrap against the recipe's true sampling distribution (D19).
+    """Spread of the bootstrap vs the spread of static CARE's F1 over 100 re-drawn splits (D19).
 
-    For static CARE (no LLM), re-drawing whole splits with seeds 0-99 gives the recipe's actual
-    sampling distribution of F1; a sound design-based bootstrap should not be narrower.
+    The 100 splits are a Monte Carlo estimate of the recipe's sampling distribution.  This compares
+    spreads only; interval *coverage* is checked separately by `bootstrap_coverage` (D22).
     """
-    rows = [dict(source="100 re-drawn splits (true recipe sampling distribution)", sd=float(seeds.f1.std()),
+    rows = [dict(source="100 re-drawn splits (Monte Carlo estimate of the recipe's sampling distribution)",
+                 sd=float(seeds.f1.std()),
                  q025=float(seeds.f1.quantile(.025)), q975=float(seeds.f1.quantile(.975)))]
     for r in design[(design.condition == condition) & (design.metric == "F1")].itertuples():
         rows.append(dict(source=f"{r.estimator} bootstrap on the seed-42 split", sd=r.boot_sd, q025=r.ci_lo, q975=r.ci_hi))
@@ -318,18 +328,75 @@ def oracle_bounds(obs, split):
     return pd.DataFrame(rows)
 
 
-def static_eval(split, care_cache):
+def static_care_predictions(split, care_cache):
+    """CARE (w/o Resolution) DENY decisions, cached per command string (deterministic)."""
     from care import CARE
     if "_guard" not in care_cache:
         care_cache["_guard"] = CARE(use_judge=False)
-    p = []
     for c in split.command:
         if c not in care_cache:
             care_cache[c] = care_cache["_guard"].analyze(c)["decision"] == "DENY"
-        p.append(care_cache[c])
-    p = np.array(p, bool)
-    m = S.point_metrics(split.label_dangerous.to_numpy(bool), p)
+    return np.array([care_cache[c] for c in split.command], bool)
+
+
+def static_eval(split, care_cache):
+    m = S.point_metrics(split.label_dangerous.to_numpy(bool), static_care_predictions(split, care_cache))
     return {k: 100 * m[k] for k in ("f1", "dr", "fpr")}
+
+
+# A deliberately simple, synthetic second guard: used ONLY to give the coverage study a paired contrast
+# between two deterministic guards (no LLM needed).  It is not a baseline and is never compared with the paper.
+SYNTHETIC_KEYWORD_GUARD = re.compile(r"\b(rm|curl|wget|nc|ncat|chmod|chown|sudo|base64|crontab|ssh|scp|useradd|"
+                                     r"iptables|systemctl|kill|dd|mkfifo|python3?|perl)\b")
+
+
+def keyword_guard_predictions(split):
+    return split.command.map(lambda c: bool(SYNTHETIC_KEYWORD_GUARD.search(c))).to_numpy(bool)
+
+
+def _coverage_quantities(w, y, care, kw):
+    a, b = S.weighted_rates(w, y, care), S.weighted_rates(w, y, kw)
+    return {"static CARE F1": a["f1"], "static CARE DR": a["dr"], "static CARE FPR": a["fpr"],
+            "keyword guard F1": b["f1"], "delta F1 (static CARE - keyword)": a["f1"] - b["f1"],
+            "delta accuracy (static CARE - keyword)": a["acc"] - b["acc"]}
+
+
+def bootstrap_coverage(build, order_of, care_cache, cfg):
+    """Coverage of the 95% bootstrap intervals, by simulation over the recipe itself (D22).
+
+    Target: the expected value of each quantity over splits drawn by the recipe, estimated
+    as the mean over `truth_seeds` (independent of the evaluated seeds).  For each split
+    drawn with `eval_seeds`, compute the bootstrap interval from that split alone and check
+    whether it covers the target.  Deterministic guards only (static CARE and a synthetic
+    keyword guard), so the study needs no LLM calls; includes paired contrasts.
+    """
+    c = cfg["analysis"]["coverage"]
+    level = cfg["analysis"]["ci_level"]
+
+    def point(split):
+        y = split.label_dangerous.to_numpy(bool)
+        one = np.ones((1, len(split)), dtype=np.int32)
+        q = _coverage_quantities(one, y, static_care_predictions(split, care_cache), keyword_guard_predictions(split))
+        return {k: 100 * float(v[0]) for k, v in q.items()}
+
+    truth = pd.DataFrame([point(build(s)) for s in range(c["truth_seeds"][0], c["truth_seeds"][1] + 1)]).mean()
+    rows = []
+    for seed in range(c["eval_seeds"][0], c["eval_seeds"][1] + 1):
+        split = build(seed)
+        y = split.label_dangerous.to_numpy(bool)
+        care, kw = static_care_predictions(split, care_cache), keyword_guard_predictions(split)
+        for estimator in ("recipe", "cluster"):
+            w = _bootstrap_weights(split, cfg, estimator, order=order_of(split), n_boot=c["resamples"], seed=seed)
+            for k, v in _coverage_quantities(w, y, care, kw).items():
+                lo, hi = S.percentile_ci(100 * v, level)
+                rows.append(dict(estimator=estimator, quantity=k, seed=seed, covered=lo <= truth[k] <= hi, width=hi - lo))
+    r = pd.DataFrame(rows)
+    out = r.groupby(["estimator", "quantity"], sort=False).agg(coverage=("covered", "mean"), mean_width=("width", "mean"),
+                                                               n_splits=("seed", "size")).reset_index()
+    out["coverage"] *= 100
+    out["mc_se"] = np.sqrt(out.coverage * (100 - out.coverage) / out.n_splits)
+    out["target"] = out.quantity.map(truth)
+    return out[["estimator", "quantity", "target", "coverage", "mc_se", "mean_width", "n_splits"]]
 
 
 # ------------------------------------------------------------------ claims
@@ -396,19 +463,17 @@ def claims_v1_0(cmp, mc, fun, metrics, seeds, cfg):
     return pd.DataFrame(out)
 
 
-BORDERLINE_PP = 0.5   # a directional verdict whose CI bound is this close to 0 is flagged as estimator-sensitive
-
-
-def claims(cmp, mc, fun, metrics, seeds, design, design_diffs, escalation, label_sens, cfg, version="1.2"):
-    """Verdicts under protocol v1.1 or v1.2 (PROTOCOL.md Sec. 11-12), next to the v1.0 verdicts.
+def claims(cmp, mc, fun, metrics, seeds, design, design_diffs, escalation, label_sens, cfg, version="1.3"):
+    """Verdicts under protocol v1.1, v1.2 or v1.3 (PROTOCOL.md Sec. 11-13), next to the v1.0 verdicts.
 
     Numeric claims (C1-C5 on F1, C8): *not supported (on this reconstruction)* if the reported
     value lies outside our design-based 95% CI, else *inconclusive (not contradicted)* -- CI
     inclusion is not equivalence and the populations differ.
     Directional claims (C6, C10): *supported* / *not supported (on this reconstruction)* only
     when the design-based CI of the paired difference excludes 0 (in / against the claimed
-    direction), else *inconclusive*.  v1.2 reports whether the paper's effect size lies in the
-    interval separately, as a descriptive magnitude check; v1.1 also used it for the verdict.
+    direction), else *inconclusive*.  From v1.2 the paper's effect size is a descriptive magnitude
+    check only (v1.1 also used it for C6).  v1.3 makes C10 simultaneous over the non-CARE
+    comparators (Bonferroni) instead of testing only the comparator with the best observed F1.
     Label-sensitive claims (C7, C9) are *inconclusive* when corpus-level and audited labels disagree.
     """
     v10 = claims_v1_0(cmp, mc, fun, metrics, seeds, cfg).set_index("claim_id")
@@ -438,7 +503,7 @@ def claims(cmp, mc, fun, metrics, seeds, design, design_diffs, escalation, label
         x = d.loc[("CARE (w/o Resolution)", base, "delta_accuracy")]
         eff = paper[base]
         in_ci = x.ci_lo <= eff <= x.ci_hi
-        if version == "1.1":
+        if version == "1.1":  # v1.1 also rejected C6 when the paper's effect size fell outside the interval
             verdicts.append("supported" if x.ci_lo > 0 else
                             "not supported" if x.ci_hi < 0 or not in_ci else "inconclusive")
         else:
@@ -467,15 +532,26 @@ def claims(cmp, mc, fun, metrics, seeds, design, design_diffs, escalation, label
     row("C9", c9[0] if len(set(c9)) == 1 else "inconclusive (label-sensitive)",
         "; ".join(f"{lab}: DANGEROUS judge ALLOWs per run {r.judge_allow_dangerous_per_run}" for lab, r in judged.iterrows()))
 
-    best = design_diffs[(design_diffs.metric == "delta_F1") & ~design_diffs.left.str.startswith("CARE")
-                        & design_diffs.right.str.startswith("CARE")]
-    worse = best[best.ci_lo > 0]
-    borderline = any(min(abs(r.ci_lo), abs(r.ci_hi)) < BORDERLINE_PP for r in best.itertuples())
-    row("C10", NS if len(worse) == len(best) and len(best) else "inconclusive",
-        "; ".join(f"{r.left} - {r.right}: delta F1 {r.value:+.2f} pp [{r.ci_lo:.2f}, {r.ci_hi:.2f}]" for r in best.itertuples())
-        + "; coverage: 6 of the paper's 12 rows"
-        + (f"; BORDERLINE: a CI bound lies within {BORDERLINE_PP} pp of 0, so the verdict depends on the "
-           "bootstrap estimator (compare outcome_v1_1)" if borderline else ""))
+    vs = design_diffs[(design_diffs.metric == "delta_F1") & ~design_diffs.left.str.startswith("CARE")
+                      & design_diffs.right.str.startswith("CARE")]
+    if version in ("1.1", "1.2"):   # unadjusted interval against the best-scoring non-CARE condition
+        f1 = metrics[(metrics.rep == cfg["analysis"]["primary_run"]) & (metrics.metric == "F1")].set_index("condition").value
+        best_name = f1[[c for c in vs.left.unique()]].idxmax()
+        best = vs[vs.left == best_name]
+        verdict = NS if len(best) and (best.ci_lo > 0).all() else "inconclusive"
+        why = "; ".join(f"{r.left} - {r.right}: delta F1 {r.value:+.2f} pp [{r.ci_lo:.2f}, {r.ci_hi:.2f}]"
+                        for r in best.itertuples()) + " (unadjusted; comparator chosen as the best observed F1)"
+    else:                           # v1.3: simultaneous (Bonferroni) over the non-CARE comparators (D23)
+        groups = dict(tuple(vs.groupby("right")))
+        beaten = {c: bool((g.adj_ci_lo > 0).any()) for c, g in groups.items()}
+        wins = {c: bool((g.adj_ci_hi < 0).all()) for c, g in groups.items()}
+        verdict = ("supported" if any(wins.values()) else
+                   NS if groups and all(beaten.values()) else "inconclusive")
+        best = vs.loc[vs.groupby("right").value.idxmax()]
+        why = ("; ".join(f"{r.left} - {r.right}: delta F1 {r.value:+.2f} pp, Bonferroni-adjusted CI "
+                         f"[{r.adj_ci_lo:.2f}, {r.adj_ci_hi:.2f}]" for r in best.itertuples())
+               + f" (simultaneous over the {vs.left.nunique()} non-CARE comparators)")
+    row("C10", verdict, why + "; coverage: 6 of the paper's 12 rows")
     row("C11", "inconclusive", v10.loc["C11", "evidence"])
     return pd.DataFrame(out)
 
@@ -640,8 +716,9 @@ def results_markdown(res, cfg, mode):
         L.append(f"> **{mode.upper()} MODE — NOT A REPRODUCTION.** Numbers below come from a reduced run.\n")
     L.append("> All comparisons with the paper are **not directly comparable**: the population is a reconstruction "
              "(same corpora and recipe, not the authors' 549 items) and labels are corpus-level (paper Table I).\n")
-    L.append("### Claim verdicts (protocol v1.2, PROTOCOL.md §12; v1.1 and v1.0 verdicts kept for the record)\n")
-    L.append(md_table(res.claims[["claim_id", "claim", "outcome", "rationale", "outcome_v1_1", "outcome_v1_0"]]))
+    L.append("### Claim verdicts (protocol v1.3, PROTOCOL.md §11-§13; earlier verdicts kept for the record)\n")
+    L.append(md_table(res.claims[["claim_id", "claim", "outcome", "rationale", "outcome_v1_2_rules", "outcome_v1_1",
+                                  "outcome_v1_0"]]))
     L.append("\n### Reported vs observed (Table II; primary run = run %d; descriptive)\n" % p)
     L.append(md_table(table_ii_view(res.comparison)))
     flips = flip_rates(res.metrics)
@@ -651,10 +728,13 @@ def results_markdown(res, cfg, mode):
     L.append(md_table(latency_view(res.comparison)))
     if usage := usage_line(res.metrics):
         L.append(f"\n{usage}\n")
-    L.append("\n### Paired differences, recipe bootstrap (primary run; D19)\n")
+    L.append("\n### Paired differences, recipe bootstrap (primary run; adj = Bonferroni over non-CARE comparators, D23)\n")
     L.append(md_table(res.design_diffs.drop(columns=["ci_method", "estimator"])))
+    if res.coverage is not None:
+        L.append("\n### Simulated coverage of the 95% bootstrap intervals (D22; deterministic guards, 100 re-drawn splits)\n")
+        L.append(md_table(res.coverage))
     if res.calibration is not None:
-        L.append("\n### Bootstrap calibration: static CARE F1 vs the recipe's true sampling distribution (D19)\n")
+        L.append("\n### Bootstrap spread vs spread over 100 re-drawn splits (static CARE F1; D19)\n")
         L.append(md_table(res.calibration))
     L.append("\n### Paired McNemar tests (primary run; two-sided, Yates as in Table VIII; assume independent commands)\n")
     L.append(md_table(res.mcnemar, ".3g"))

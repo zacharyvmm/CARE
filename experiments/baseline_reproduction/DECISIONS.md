@@ -426,3 +426,64 @@ changes data, prompts, model, runs or metric formulas.
   * the v1.0 verdicts equal those at `7ecde67`;
   * the post-hoc amendment and the scope of the label audit are adequately
     disclosed.
+
+### D22: Recipe bootstrap completed and its coverage checked by simulation (protocol v1.3 §13.1–13.2)
+* **Change:**
+  * Family truncation now follows corpus order, using `dataset.corpus_order`.
+  * The RedCode remainder allocation is random in each resample.
+  * Interval coverage is checked by simulation:
+    `results/bootstrap_coverage.parquet`, deterministic guards, 100 evaluated
+    splits, and a target taken from 200 independent splits.
+  * The claim that the intervals are "conservative" is withdrawn.
+* **Rationale:** reviewer findings G1 and G2 (L10):
+  * the bootstrap truncated in `command_id` order, which differs from corpus
+    order in 19 of 41 ART families;
+  * it fixed the seed-42 RedCode allocation;
+  * an SD comparison does not establish coverage.
+* **Evidence:** nominal 95% coverage (Monte Carlo SE about 2.4 pp):
+
+  | Quantity | Recipe bootstrap | v1.1 cluster bootstrap |
+  |---|---|---|
+  | Static CARE F1, DR, FPR | 94%, 94%, 93% | 96%, 96%, 93% |
+  | Keyword-guard F1 | 98% | 98% |
+  | Paired ΔF1 | 94% | 93% |
+  | Paired Δaccuracy | 93% | 93% |
+
+  The recipe bootstrap's coverage is consistent with the nominal 95%. LLM
+  conditions cannot be simulated without new calls; their coverage is assumed
+  by analogy.
+* **Impact:** the intervals move by at most about 0.4 pp; for example static
+  CARE F1 is now [45.8, 69.3]. No verdict changes because of D22 alone.
+* **Affects:** all design-based CIs.
+
+### D23: C10 inference is simultaneous over comparators (protocol v1.3 §13.3)
+* **Change:** C10 now uses Bonferroni-adjusted intervals over the 3 non-CARE
+  comparators, instead of an unadjusted interval against the comparator chosen
+  as the best observed F1. The BORDERLINE flag of v1.2 is removed.
+* **Rationale:** reviewer finding G3 (L10). Choosing the comparator after
+  observing F1 needs a selection adjustment.
+* **Impact:**
+  * C10 changes from *not supported* (v1.2 rules) to *inconclusive*.
+  * LLMJudge − CARE (w/o R): +11.5 pp, adjusted [−1.34, 30.53].
+  * LLMJudge − CARE: +12.8 pp, adjusted [0.51, 31.63].
+  * The observed ranking, with LLMJudge highest, is reported descriptively.
+* **Record:** the v1.2 C10 verdict as recorded at `1f32fd6` is in that commit's
+  `results/claims.parquet`. The `outcome_v1_2_rules` column applies the v1.2
+  rules with the D22 estimator.
+* **Affects:** C10.
+
+### L10: External review, round 3 (Codex, gpt-6.1-sol, high effort)
+* **Review:** of `1f32fd6`. Verdict: **REVISE**, with no blocker.
+* **Round-2 status:** F2, F3, F4, F5 and F6 resolved; F1 partially resolved. The
+  reviewer independently reconstructed all four legacy request fingerprints
+  from `de2bc54`, and they matched.
+* **New findings:**
+  * G1 (MAJOR): truncation order and RedCode remainder → D22.
+  * G2 (MAJOR): calibration does not establish coverage → D22.
+  * G3 (MAJOR): C10 comparator selection → D23.
+  * G4 (MINOR): stale baseline-use instructions and summaries → the README,
+    notebook and PR were corrected.
+* **Convergence note:** two consecutive rounds found issues in the same area,
+  inferential uncertainty. Following the review-loop guard, the estimator was
+  completed against the recipe and validated by simulation, rather than patched
+  case by case.

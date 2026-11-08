@@ -8,6 +8,7 @@ DANGEROUS is the positive class; a DENY decision is a positive prediction.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 from scipy import stats
 
 Z95 = 1.959963984540054
@@ -114,45 +115,56 @@ def percentile_ci(x, level=0.95):
     return tuple(np.nanquantile(np.asarray(x, float), [a, 1 - a]))
 
 
-def recipe_bootstrap_weights(source, family, head, quotas, n_boot=10_000, seed=0, head_cap=12,
+def recipe_bootstrap_weights(source, family, head, quotas, n_boot=10_000, seed=0, head_cap=12, order=None,
                              family_sources=("ART", "NL2Bash"), stratified_sources=("RedCode-Exec",),
                              capped_sources=("NL2Bash",)):
-    """Resampling weights that re-run the split recipe on the observed sample (protocol v1.2, D19).
+    """Resampling weights that re-run the split recipe on the observed sample (protocol v1.2-v1.3, D19, D22).
 
     Mirrors `dataset.build_split` source by source:
-      * family sources (ART, NL2Bash): whole families are drawn with replacement in random
-        order and appended until the source quota is reached; the last family is truncated,
-        exactly like `family_draw`; NL2Bash also applies the per-head cap;
-      * stratified sources (RedCode-Exec): each scenario keeps its size, items drawn with
-        replacement within it (the round-robin fixes per-scenario counts);
+      * family sources (ART, NL2Bash), as `family_draw`: whole families are drawn with replacement
+        in random order and their members appended *in corpus order* (`order`) until the source
+        quota is reached -- the last family is truncated; NL2Bash skips members whose head already
+        has `head_cap` commands;
+      * stratified sources (RedCode-Exec), as `stratified_draw`: a random scenario order decides
+        which scenarios receive the remainder (quota mod #scenarios) of the round-robin; items are
+        drawn with replacement within each scenario;
       * every other source (Real-world) is a fixed, deterministic subset: weight 1.
-    Source totals, and so class prevalence, are fixed as in the recipe.  Drawing with
-    replacement ignores the finite-population correction, so intervals are conservative.
+    Source totals, and so class prevalence, are fixed as in the recipe.  Drawing families and
+    items with replacement from the sample is an approximation (no finite-population
+    correction); its coverage is checked by simulation (`report.bootstrap_coverage`).
     """
     source, family, head = np.asarray(source), np.asarray(family), np.asarray(head)
+    order = np.arange(len(source)) if order is None else np.asarray(order)
     rng = np.random.default_rng(seed)
     w = np.zeros((n_boot, len(source)), dtype=np.int32)
     w[:, ~np.isin(source, list(family_sources) + list(stratified_sources))] = 1
     for s in stratified_sources:
         in_s = np.flatnonzero(source == s)
-        for f in sorted(set(family[in_s])):
-            items = in_s[family[in_s] == f]
-            draws = items[rng.integers(0, len(items), size=(n_boot, len(items)))]
-            np.add.at(w, (np.arange(n_boot)[:, None], draws), 1)
+        if not len(in_s):
+            continue
+        strata = [in_s[family[in_s] == f] for f in sorted(set(family[in_s]))]
+        base, rem = divmod(quotas.get(s, len(in_s)), len(strata))
+        for b in range(n_boot):
+            extra = set(rng.permutation(len(strata))[:rem])
+            for k, items in enumerate(strata):
+                np.add.at(w[b], items[rng.integers(0, len(items), base + (k in extra))], 1)
     for s in family_sources:
         in_s = np.flatnonzero(source == s)
+        if not len(in_s):
+            continue
         fams = sorted(set(family[in_s]))
         members = [in_s[family[in_s] == f] for f in fams]
+        members = [m[np.argsort(order[m], kind="stable")] for m in members]
         quota, cap = quotas[s], (head_cap if s in capped_sources else None)
+        _, head_code = np.unique(head, return_inverse=True)
         for b in range(n_boot):
-            n, heads = 0, {}
-            while n < quota:
-                for i in members[rng.integers(len(fams))]:
-                    if cap is not None and heads.get(head[i], 0) >= cap:
-                        continue
-                    w[b, i] += 1
-                    heads[head[i]] = heads.get(head[i], 0) + 1
-                    n += 1
-                    if n == quota:
-                        break
+            n_draw = quota
+            while True:
+                seq = np.concatenate([members[j] for j in rng.integers(len(fams), size=n_draw)])
+                if cap is not None:
+                    seq = seq[pd.Series(head_code[seq]).groupby(head_code[seq]).cumcount().to_numpy() < cap]
+                if len(seq) >= quota:
+                    break
+                n_draw *= 2  # rare: not enough commands before the head cap; draw a longer family sequence
+            np.add.at(w[b], seq[:quota], 1)
     return w

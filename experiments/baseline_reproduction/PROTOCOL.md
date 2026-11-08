@@ -328,3 +328,57 @@ verdicts are still computed and reported (`claims.parquet`: `outcome_v1_0`,
 * The lockfile requires **Python ≥ 3.12**, because NumPy 2.5.4 and SciPy 1.18.1
   require it. Python 3.12 is the validated version. This corrects the
   "Python ≥ 3.10" in §8.
+
+## 13. Amendment v1.3 (post-confirmatory, after external review round 3; disclosed)
+
+**Status:** written on 2026-11-08 after review round 3 (DECISIONS.md L10), with
+all earlier results known. It changes **no data, prompt, model, run or metric
+formula**. Earlier verdicts are still reported: `outcome_v1_2_rules`,
+`outcome_v1_1` and `outcome_v1_0`.
+
+### 13.1 Recipe bootstrap: remaining design features (D22)
+
+The bootstrap now mirrors two more parts of the recipe:
+* **Truncation order.** Family members are appended, and the last family is
+  truncated, in *corpus order*, as `family_draw` does. Before, row order was
+  used, and the split is sorted by `command_id`.
+* **RedCode remainder.** A random scenario order decides which scenarios
+  receive the remainder of the round-robin (71 = 20 × 3 + 11), as
+  `stratified_draw` does. Before, the seed-42 allocation was kept fixed.
+
+### 13.2 Target and validation of the intervals (D22)
+
+* **Target.** The *expected* value of each metric (and paired difference) over
+  splits drawn by this recipe from the pinned corpora.
+* **Approximation.** Drawing with replacement from the one observed split is an
+  approximation, so its validity is **checked by simulation**, not asserted:
+  * for 100 splits drawn with seeds 0–99, the 95% interval is computed from
+    each split alone, with 1,000 resamples;
+  * coverage is the share of those intervals that contain the target;
+  * the target is estimated as the mean over 200 independent splits (seeds
+    1000–1199).
+* **What can be simulated.** Only deterministic guards can be simulated without
+  LLM calls: static CARE and a synthetic keyword guard, so paired contrasts are
+  included. The LLM conditions' intervals use the same estimator; their
+  coverage is assumed by analogy, not checked.
+* **Calibration table.** The earlier comparison of standard deviations
+  (`bootstrap_calibration.parquet`) is kept as a description of spread only. It
+  is no longer described as showing that the intervals are conservative.
+
+### 13.3 C10 accounts for comparator selection (D23)
+
+* **The problem.** C10 ("CARE has the highest F1") was tested against the
+  non-CARE condition with the best observed F1, using an unadjusted interval.
+* **The rule now.** Intervals are simultaneous over the non-CARE comparators,
+  using a Bonferroni level of 1 − 0.05/3.
+* **Verdicts.**
+  * *not supported (on this reconstruction)* if, for every CARE variant, some
+    comparator's adjusted interval for (comparator − CARE variant) lies above 0;
+  * *supported* if some CARE variant's adjusted intervals lie below 0 against
+    every comparator;
+  * otherwise *inconclusive*.
+* **BORDERLINE flag.** Removed. The adjusted intervals replace it.
+* **C6.** C6 needs *both* pairs to be significant to be supported, an
+  intersection–union test that needs no adjustment. It is *not supported* only
+  if a pair is significant in the opposite direction; that union of tests is
+  unadjusted, but it did not occur.

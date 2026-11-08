@@ -360,3 +360,22 @@ def test_reuse_requires_identical_requests():
         P._assert_same_requests(identity, obs.assign(provider="Other"), LLM_CFG)
     with pytest.raises(AssertionError):
         P._assert_same_requests(identity, obs.assign(model="m0"), LLM_CFG)
+
+
+def test_recipe_bootstrap_truncates_in_corpus_order_not_row_order():
+    source = np.array(["ART"] * 3)
+    family = np.array(["a", "a", "a"])
+    head = np.array(["-"] * 3)
+    order = np.array([2, 0, 1])                       # corpus order: row 1, then row 2, then row 0
+    w = S.recipe_bootstrap_weights(source, family, head, {"ART": 2}, n_boot=50, seed=0, order=order)
+    assert (w[:, 1] >= 1).all() and (w[:, 2] >= 1).all() and (w[:, 0] == 0).all()
+
+
+def test_recipe_bootstrap_randomises_which_scenarios_get_the_remainder():
+    source = np.array(["RedCode-Exec"] * 7)
+    family = np.array(["s1", "s1", "s1", "s2", "s2", "s3", "s3"])
+    w = S.recipe_bootstrap_weights(source, family, np.array(["-"] * 7), {"RedCode-Exec": 7}, n_boot=300, seed=1)
+    sizes = np.stack([w[:, family == f].sum(1) for f in ("s1", "s2", "s3")], axis=1)
+    assert (sizes.sum(1) == 7).all() and set(np.unique(sizes)) == {2, 3}
+    assert all(len(set(sizes[:, k])) == 2 for k in range(3))   # each scenario sometimes gets the extra item
+

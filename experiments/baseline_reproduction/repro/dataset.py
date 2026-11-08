@@ -239,3 +239,10 @@ def composition(df):
     return df.groupby(["source", "label"]).agg(
         n=("command_id", "size"), families=("family", "nunique"), heads=("head", "nunique"),
         multiline=("command", lambda c: int(c.str.contains("\n").sum()))).reset_index()
+
+
+def corpus_order(df, roots, real_world_file, label_filter=True):
+    """Each command's position in its source pool: the member order `family_draw` truncates in."""
+    p = load_pools(roots, real_world_file, label_filter)
+    pos = {r["command_id"]: i for k in SOURCES for i, r in enumerate(p[k])}
+    return df.command_id.map(pos).to_numpy()
