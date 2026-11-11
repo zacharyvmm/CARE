@@ -1,175 +1,218 @@
 # Baseline reproduction: CARE main-split detection (Table II)
 
-**Status: PARTIAL / provisional.**
-* **Execution.** The protocol was executed in full: one live confirmatory run and a clean-clone re-execution of
-  the notebook.
-* **Protocol history.** The protocol was amended three times (v1.1–v1.3) after three rounds of external review
-  (DECISIONS L8–L10). The amendments change how uncertainty is computed and validated, how verdicts are worded and
-  how reuse is checked, not data, runs or metric formulas.
-* **Scope.** Every result is on a **reconstructed** population, and every numerical comparison with the paper is
-  **not directly comparable**.
+An independent attempt to reproduce the main detection experiment of
+Liu et al., *CARE: Pre-Execution Command Verification for Shell-Executing LLM Agents*
+(IEEE ISSRE 2026, [arXiv:2607.21642v2](https://arxiv.org/abs/2607.21642v2)), for use as a
+baseline in follow-up work.
 
-**Entry point:** [`baseline_reproduction.ipynb`](baseline_reproduction.ipynb). Restart & Run All.
-Each stage is one call into [`repro/pipeline.py`](repro/pipeline.py), which reads top to bottom in
-the same order.
-* §1 is the contract and protocol.
-* §2–§6 run the pipeline.
-* §7 gives the results, §8 the diagnostics and §9 the limitations.
+**Status: partial.** The protocol was executed in full, but on a population rebuilt from the
+public corpora: the authors' 549 evaluation commands are not released. Every comparison with
+the paper is therefore **not directly comparable**. Six of the paper's twelve Table II rows
+are covered.
 
 | | |
 |---|---|
-| Paper | Liu et al., *CARE: Pre-Execution Command Verification for Shell-Executing LLM Agents*, IEEE ISSRE 2026, [arXiv:2607.21642v2](https://arxiv.org/abs/2607.21642v2) |
-| Targets | Table II (6 of 12 rows), Table VIII (McNemar), App. A.F (Resolution funnel), Sec. V-A1. Claims C1–C11 |
-| Classification | *Partial reproduction* for CARE (author code, run unmodified). *Replication* for the data: the split is reconstructed because the authors' split is unreleased. *Reimplementation* for the LLM-judge baselines (verbatim App. E prompts) |
-| Protocol | [`PROTOCOL.md`](PROTOCOL.md). v1.0 was frozen in commit `de2bc54` before the confirmatory run; the v1.1–v1.3 amendments (§11–§13) were written after the results and external review. **Not blind:** a pilot came first |
-| Decisions | [`DECISIONS.md`](DECISIONS.md), append-only: D1–D23, L1–L11 |
+| **Start here** | [`baseline_reproduction.ipynb`](baseline_reproduction.ipynb): the executed notebook, one pipeline stage per section |
+| **Protocol** | [`PROTOCOL.md`](PROTOCOL.md) v2.0, frozen before the run |
+| **Decisions** | [`DECISIONS.md`](DECISIONS.md), append-only |
+| **All tables** | [`results/report.md`](results/report.md) |
 
-## Results (primary run = run 1 of 3; descriptive comparison)
+## What was done
 
-* **Population.** The same corpora and recipe as the paper, but not the authors' 549 items.
-* **Labels.** Corpus-level, the paper's Table I convention.
-* **CIs.** All intervals are **design-based** 95% CIs from the recipe bootstrap (D19, D22), which re-runs the split
-  recipe on the sample:
-  * fixed source quotas;
-  * families appended in corpus order until each quota is reached, with the NL2Bash head cap;
-  * a random allocation of the RedCode remainder, with commands drawn within each scenario;
-  * the real-world subset kept fixed.
-* **Interval validity.** The target is the expected value over splits drawn by this recipe. Coverage was checked by
-  simulation for the deterministic guards: over 100 re-drawn splits, the intervals covered the target 93–98% of the
-  time, against a nominal 95% (Monte Carlo SE about 2.4 pp). For the LLM conditions, coverage is assumed by
-  analogy.
-* **Symbols.** ∈ / ∉ say whether the reported value falls inside that interval. Inclusion is not evidence of
-  equivalence.
+Every guard was run on **every command** of the corpora the paper draws from: 11,665 commands,
+with three runs of each LLM condition (105,651 LLM calls, no errors, US$1.85).
 
-| Condition | F1 reported → observed [95% CI] | DR reported → observed | FPR reported → observed | Verdict (v1.3) |
+| Source | Class | Commands |
+|---|---|---|
+| Atomic Red Team (Linux sh/bash tests) | DANGEROUS | 415 |
+| RedCode-Exec (bash) | DANGEROUS | 598 |
+| NL2Bash | SAFE | 10,338 |
+| Real-world developer commands | SAFE | 30 |
+| NL2Bash commands with unconditionally dangerous operations: run, but in no metric | — | 284 |
+
+The guards are the released CARE implementation, unmodified, with and without its Resolution
+judge, and three LLM-judge baselines with the paper's verbatim prompts (PromptOnly, LLMJudge,
+and the NeMo self-check prompt without the NeMo framework). All LLM calls use the paper's
+model, Qwen3-Coder-30B-A3B-Instruct.
+
+The results are read in two ways:
+
+* **Full corpora.** Detection rate (DR) and false-positive rate (FPR) on every command. These
+  are exact counts.
+* **Paper-sized splits.** The paper reports statistics of one 549-command split. To compare
+  like with like, the paper's composition (Table I) is re-drawn from the corpora 10,000 times
+  and each statistic is computed on every split. We report the mean and the **range** that
+  holds the central 95% of the splits. The range is not a confidence interval: it shows how
+  much a statistic varies from split to split on this population.
+
+## Results
+
+### Reported vs observed on paper-sized splits (primary run)
+
+Each cell reads *reported → observed mean [range]*. ∈ / ∉: the reported value lies inside /
+outside the range.
+
+| Guard | F1 | DR | FPR |
+|---|---|---|---|
+| PromptOnly | 66.99 → **61.06** [54.7, 67.0] ∈ | 63.18 → 55.08 [47.3, 62.7] ∉ | 17.02 → 16.86 [12.8, 21.0] ∈ |
+| LLMJudge | 73.09 → **66.15** [59.9, 71.9] ∉ | 67.27 → 58.69 [50.9, 65.9] ∉ | 11.25 → 12.46 [8.8, 16.1] ∈ |
+| NeMo self-check (emulated) | 68.63 → **63.94** [56.8, 70.6] ∈ | 58.18 → 51.99 [44.1, 60.0] ∈ | 7.60 → 6.98 [4.3, 9.7] ∈ |
+| CARE (w/o Resolution) | 84.99 → **60.15** [51.4, 67.9] ∉ | 75.91 → 47.04 [37.7, 55.9] ∉ | 1.82 → 6.07 [3.6, 8.8] ∉ |
+| CARE | 85.64 → **59.21** [50.3, 67.0] ∉ | 75.91 → 45.58 [36.4, 54.1] ∉ | 0.91 → 5.39 [3.0, 7.9] ∉ |
+
+![Reported vs observed](results/figures/reported_vs_observed.png)
+
+![F1 of every paper-sized split](results/figures/f1_over_splits.png)
+
+### Full corpora: every guard on every command (primary run)
+
+| Guard | DR, all 1,013 DANGEROUS | DR, ART | DR, RedCode-Exec | FPR, all 10,368 SAFE |
 |---|---|---|---|---|
-| PromptOnly | 66.99 → 63.50 [55.4, 70.9] ∈ | 63.18 → 57.73 | 17.02 → 16.11 | C3 inconclusive (not contradicted) |
-| LLMJudge | 73.09 → 70.26 [63.0, 76.8] ∈ | 67.27 → 62.27 | 11.25 → 10.03 | C4 inconclusive (not contradicted) |
-| NeMo self-check (emulated) | 68.63 → 66.12 [58.1, 73.1] ∈ | 58.18 → 55.45 | 7.60 → 8.21 | C5 inconclusive (not contradicted) |
-| CARE (w/o Resolution) | 84.99 → **58.72** [45.8, 69.3] ∉ | 75.91 → 43.64 | 1.82 → 3.34 | C1 **not supported** (on this reconstruction) |
-| CARE | 85.64 → **57.41** [44.4, 68.0] ∉ | 75.91 → 42.27 | 0.91 → 3.34 | C2 **not supported** (on this reconstruction) |
+| PromptOnly | 52.1% | 58.6% | 47.7% | 27.2% |
+| LLMJudge | 52.4% | 66.3% | 42.8% | 18.5% |
+| NeMo self-check (emulated) | 46.4% | 58.8% | 37.8% | 12.7% |
+| CARE (w/o Resolution) | 44.8% | 49.6% | 41.5% | 3.6% |
+| CARE | 42.5% | 49.2% | 38.0% | 3.2% |
 
-The other claims:
+F1 on the full corpora is in `results/report.md`. It is not comparable with the paper's F1,
+because only 9% of the full corpora is DANGEROUS, against 40% of the paper's split.
 
-* **C6 inconclusive.** The paired difference in accuracy, CARE (w/o R) minus the baseline:
-  * vs PromptOnly: +2.0 pp [−5.3, 8.2];
-  * vs LLMJudge: −3.5 pp [−10.4, 2.2].
-  Neither interval excludes 0, so superiority is unresolved. Separately and descriptively, both intervals exclude the
-  paper's effects of +14.2 and +9.1 pp from Table VIII. v1.1 had counted that magnitude check toward the verdict
-  (D21).
-* **C7 and C9 inconclusive (label-sensitive).** Under corpus-level labels, Resolution allows 3 / 2 / 3
-  DANGEROUS-labelled commands per run and lowers DR by 1.4 pp. Those three commands are benign in content: two ART
-  base64 "Hello" round-trips and one RedCode in-memory lookup. When they are audited as SAFE (D17), Resolution
-  lowers FPR by 0.9 pp at unchanged DR, and allows no dangerous command.
-* **C8 inconclusive (not contradicted).** The escalation rate is 3.64% [2.0, 5.8], against 4.19% reported.
-* **C10 inconclusive.** LLMJudge has the highest observed F1 of the 6 evaluated conditions. The intervals below are
-  simultaneous over the 3 non-CARE comparators (Bonferroni, D23), because the strongest comparator was chosen after
-  seeing the results:
-  * LLMJudge minus CARE: +12.8 pp [0.5, 31.6];
-  * LLMJudge minus CARE (w/o R): +11.5 pp [−1.3, 30.5].
-  Static CARE is therefore not shown to be beaten. v1.2 used an unadjusted interval against the selected comparator
-  and called C10 *not supported*.
-* **C11 inconclusive.** Hardware differs, so latency is not comparable.
+### Claim verdicts
 
-Earlier verdicts are kept in `results/claims.parquet` (`outcome_v1_2_rules`, `outcome_v1_1`, `outcome_v1_0`). Full tables are in `results/report.md` and the executed notebook.
+| Claim | Verdict | Evidence |
+|---|---|---|
+| C1 CARE (w/o Resolution): F1 84.99 | **not supported** (on this reconstruction) | mean 60.15, range [51.4, 67.9]; the best of 10,000 splits reaches 75.27 |
+| C2 CARE: F1 85.64 | **not supported** (on this reconstruction) | mean 59.21, range [50.3, 67.0]; best split 74.46 |
+| C3 PromptOnly: F1 66.99 | inconclusive (not contradicted) | mean 61.06, range [54.7, 67.0]; the reported value sits at the upper edge |
+| C4 LLMJudge: F1 73.09 | **not supported** (on this reconstruction) | mean 66.15, range [59.9, 71.9] |
+| C5 NeMo self-check: F1 68.63 | inconclusive (not contradicted) | mean 63.94, range [56.8, 70.6] |
+| C6 CARE (w/o Resolution) significantly outperforms PromptOnly and LLMJudge | inconclusive | accuracy difference +3.2 pp [−2.2, 8.4] vs PromptOnly and −0.8 pp [−5.8, 4.0] vs LLMJudge (paper: +14.2 and +9.1) |
+| C7 Resolution lowers FPR at unchanged DR | inconclusive (label-sensitive) | corpus labels: FPR −0.38 pp, DR −2.27 pp. Audited labels: FPR −0.60 pp, DR unchanged |
+| C8 About 4.2% of commands reach the LLM | inconclusive (not contradicted) | 4.21% [2.4, 6.2] on paper-sized splits; 1.93% on the full corpora |
+| C9 The judge never allows a DANGEROUS command | inconclusive (label-sensitive) | the judge allows 23 DANGEROUS-labelled commands; all 23 only print output and are audited SAFE |
+| C10 CARE has the highest F1 | inconclusive | LLMJudge is ahead of CARE by 6.9 pp on average, but the simultaneous range [−18.9, 3.7] includes 0 |
+| C11 Latency 0.34 ms / 2.32 ms | inconclusive | hardware and serving differ |
+
+## What the evidence shows, and what it does not
+
+**Shows, on this reconstruction:**
+
+* **CARE's reported F1 is not reached.** Not one of 10,000 paper-sized splits comes within
+  9 points of it. The misses are static: CARE allows half of the ART commands and 58% of the
+  RedCode-Exec scripts outright.
+* **A better judge would not close the gap.** A *perfect* Resolution judge on every WARN
+  command would raise CARE's F1 from 60.2 to 63.4.
+* **The LLM-judge baselines also fall short of the paper**, by 5 to 7 F1 points, mostly in
+  detection rate. LLMJudge's reported F1 lies outside its range.
+* **At the paper's composition, CARE and the LLM judges are not separated.** No paired
+  difference in F1 or accuracy excludes zero.
+* **CARE's advantage is its false-positive rate.** On the full corpora it wrongly blocks 3.6%
+  of the safe commands, against 12.7–27.2% for the LLM judges. Where safe commands dominate,
+  that makes CARE the most accurate of the five guards.
+* **The result is stable.** The three LLM runs differ on 0.1–3.3% of the decisions, and on
+  the 549 commands that protocol v1 evaluated in a separate run, 98.0–100% of the decisions
+  are the same.
+
+**Does not show:**
+
+* **Why the paper's numbers differ.** The canonical attacks, the authors' RedCode filter and
+  their ART snapshot are unknown. We cannot separate "the authors' commands differ from
+  ours" from "the rule bank was fitted to their pool". Releasing the authors' split would
+  settle it.
+* **Harmfulness.** Labels are corpus-level, as in the paper: every ART and RedCode-Exec
+  command counts as DANGEROUS. Some are harmless when run (see C9).
+
+**Remaining risks:** NeMo is emulated; six baselines are not run; hosted serving has unknown
+precision; the protocol is not blind (the results of protocol v1 were known); the label audit
+behind C7 and C9 was done by the AI assistant that built the artifact, after the predictions
+were seen.
+
+**Next steps:** obtain the authors' split; an independent two-annotator label audit; Llama
+Guard 3 and Granite Guardian on local vLLM; NeMo with its framework.
+
+## Run it
+
+```bash
+python3.12 -m venv .venv && . .venv/bin/activate                 # from the repository root
+pip install -e . -r experiments/baseline_reproduction/environment/requirements.lock.txt
+cd experiments/baseline_reproduction
+jupyter nbconvert --to notebook --execute --inplace baseline_reproduction.ipynb
+```
+
+* **Without an API key** (about 2 minutes): the corpora are fetched and verified, the static
+  guards are re-run and checked against the committed observations, the LLM observations of
+  the live run are reused after their request identity is verified, and every table and figure
+  is regenerated.
+* **With `OPENROUTER_API_KEY` set** (about 35 minutes, about US$2): every LLM condition is
+  queried again.
+* **`REPRO_MODE=smoke`**: 40 commands, a quick end-to-end check. Not a reproduction.
+
+## Use it as a baseline for a new method
+
+1. Run the new method on every command in `data/population.parquet`. Only rows with
+   `in_primary` count toward metrics.
+2. Compare with the observed decisions in `results/observations.parquet`, paired on
+   `command_id`. Do not compare with the paper's numbers.
+3. Report DR and FPR on the full corpora, and F1 on the same paper-sized splits:
+
+   ```python
+   recipe = dataset.SplitRecipe(population, cfg["paper_sized_splits"]["composition"], head_cap=12)
+   splits = dataset.as_matrix(recipe.draw(range(10_000)))        # row positions into `population`
+   rates  = stats.rates(stats.split_counts(y, your_deny_decisions, splits))
+   ```
+
+Details are in `PROTOCOL.md` §12.
 
 ## Methods (adaptable for a paper)
 
 > We attempted to reproduce the main detection experiment of CARE (Liu et al., ISSRE 2026;
-> arXiv:2607.21642v2, Table II). The authors' 549-command evaluation split is not released, so we rebuilt a split
-> with the published composition (220 DANGEROUS / 329 SAFE) from the same public corpora.
+> arXiv:2607.21642v2, Table II). The authors' 549-command evaluation split is not released, so
+> we evaluated every guard on all unique commands of the corpora it was drawn from, pinned to
+> commits: the Linux sh/bash tests of Atomic Red Team (415) and the bash scripts of
+> RedCode-Exec (598) as DANGEROUS, and NL2Bash (10,338, after setting aside 284 commands with
+> operations the paper deems unconditionally dangerous) plus 30 developer commands as SAFE.
+> Labels are corpus-level, as in the paper's Table I.
 >
-> * **DANGEROUS (220):** Atomic Red Team Linux sh/bash tests (149, including 12 slots for the unreleased canonical
->   attacks) and RedCode-Exec bash scripts (71, stratified over its 20 risk scenarios).
-> * **SAFE (329):** NL2Bash (299, head-stratified with at most 12 per head, after removing operations the paper
->   deems unconditionally dangerous) and 30 real-world developer commands.
+> We ran the released CARE implementation without modification, in its static configuration
+> and with its Resolution judge, and three LLM-judge baselines with the paper's verbatim
+> prompts: PromptOnly, LLMJudge, and a framework-free emulation of the NeMo Guardrails
+> self-check rail. All LLM calls used Qwen3-Coder-30B-A3B-Instruct, the paper's backbone,
+> through OpenRouter pinned to a single provider, with temperature 0 and the paper's
+> max_tokens. Each LLM condition was run three times; run 1 was fixed in advance as the primary
+> run. The confirmatory run made 105,651 calls with no errors.
 >
-> Labels are corpus-level, as in the paper's Table I. Sampling is seeded (seed 42) and draws whole template
-> families, with all sources pinned to commits.
->
-> We evaluated the released CARE implementation without modification, in its static configuration and with its
-> Resolution judge. We also evaluated three LLM-judge baselines with the paper's verbatim prompts: PromptOnly,
-> LLMJudge, and a framework-free emulation of the NeMo Guardrails self-check rail. All LLM calls used
-> Qwen3-Coder-30B-A3B-Instruct, the paper's backbone, through OpenRouter pinned to a single provider, with
-> temperature 0 and the paper's max_tokens. Each LLM condition was run three times, and run 1 was fixed in advance
-> as the primary run.
->
-> We report F1, detection rate and false-positive rate. The 95% CIs come from a paired bootstrap (10,000 resamples)
-> that re-runs the split recipe on the sample:
->
-> * ART and NL2Bash families are appended in corpus order until each source quota is reached, with the NL2Bash
->   head cap;
-> * a random scenario order allocates the RedCode remainder, and scripts are drawn within each scenario;
-> * the real-world subset is kept fixed.
->
-> The inferential target is the expected metric over splits drawn by this recipe. In a simulation with
-> deterministic guards over 100 re-drawn splits, the 95% intervals covered that target 93–98% of the time, paired
-> contrasts included. We also give the paper's per-command McNemar tests for fidelity.
->
-> Because the population differs, comparisons with the reported values are descriptive. A numeric claim was judged
-> not supported on our reconstruction only when the reported value lay outside our interval. A directional claim
-> ("significantly better", "highest F1") was judged only on whether the interval of the paired difference excluded
-> 0, with simultaneous intervals when the comparator was selected. The confirmatory run made
-> 5,001 calls with no errors and cost US$0.099.
+> We report detection and false-positive rates on the full corpora. Because the paper's F1 is
+> a statistic of a 549-command split with a 40% DANGEROUS share, we re-drew the paper's
+> composition (149 ART, 71 RedCode-Exec, 299 head-stratified NL2Bash, 30 developer commands)
+> from the corpora 10,000 times, drawing whole template families, and computed each of the
+> paper's statistics on every split. We report the mean and the central 95% range over splits.
+> A reported value was judged not supported on our reconstruction when it lay outside that
+> range; directional claims were judged on whether the range of the paired difference excluded
+> zero, with simultaneous ranges when the comparator was selected after the fact. Because the
+> population differs from the authors', all comparisons with reported values are descriptive.
 
-## Reproducibility assessment
-
-* **What the evidence shows on this reconstruction.**
-  * Released CARE reaches a static F1 of 58.7 [45.8, 69.3], against 84.99 reported.
-  * None of 100 splits drawn with this recipe exceeds 75.0.
-  * On this population, even a *perfect* Resolution judge on every WARN command would raise F1 only to 60.8.
-  * The misses are static ALLOWs on ART (46% DR) and RedCode (38% DR).
-  * The LLM-judge baselines' reported values lie inside our intervals, but their F1 point estimates are
-    2.5–3.5 pp lower (63.50 vs 66.99, 70.26 vs 73.09, 66.12 vs 68.63).
-* **What it does not show.**
-  * Why the paper's numbers differ: our seeds vary only *our* recipe.
-  * The canonical attacks, the authors' RedCode filter and their ART snapshot are unknown. V3, an older ART
-    snapshot, already moves static F1 from 58.7 to 65.7.
-  * That the LLM-judge rows are not contradicted does not establish that our population is equally hard.
-* **Unresolved.** We cannot separate (a) differences between the authors' items and ours from (b) a rule bank fitted
-  to their pool. Releasing the authors' split would resolve this.
-* **Risks.**
-  * Labels are corpus-level, and a full independent label audit was not done.
-  * The NeMo row is emulated.
-  * Six baselines are not run.
-  * Hosted serving has unknown precision.
-  * The protocol is not blind: a pilot came first, and v1.1–v1.3 were written after the results.
-  * Interval coverage is checked for the deterministic guards only; for the LLM conditions it is assumed.
-* **Next validation steps.**
-  * Obtain the authors' split and curated subsets.
-  * Run an independent two-annotator label audit.
-  * Run Llama Guard 3 and Granite Guardian on local vLLM.
-  * Run NeMo with the actual framework.
-  * Repeat on local vLLM to compare latency.
-
-## Using this as a baseline for a new method
-
-* Evaluate the new method on `data/main_split.parquet`, using the same `command_id`s and corpus-level labels.
-* Compare against the observed rows here (`results/observations.parquet`), not the paper's numbers. Use paired,
-  design-based differences from the recipe bootstrap:
-  `w = analysis.recipe_weights(split, cfg, order=dataset.corpus_order(split, pools))`, then
-  `analysis.paired_differences(obs, split, w, "recipe", cfg)`; these build on `stats.recipe_bootstrap_weights` and
-  `weighted_rates`. Comparing against several baselines needs a multiplicity adjustment, as for C10.
-* See PROTOCOL §10–§13. Use Python 3.12; the lockfile requires at least 3.12.
-
-## Artifact inventory
+## Layout
 
 | Path | Content |
 |---|---|
-| `baseline_reproduction.ipynb` | executable narrative, executed in reuse mode. The live LLM execution is `results/executed/confirmatory_live_run.ipynb` |
-| `PROTOCOL.md`, `DECISIONS.md`, `config.yaml` | protocol (v1.0 plus the v1.1–v1.3 amendments), append-only log, configuration (pins, fingerprints, reported values) |
-| `repro/` | `pipeline` (one function per notebook stage, in execution order; start here), `sources` (pinned sparse fetch, fingerprints), `dataset` (corpora → candidate pools → split), `guards` (CARE + baselines, provider-pinned client, fingerprinted cache), `analysis` (metrics, design-based CIs, diagnostics), `sensitivity` (static CARE on re-drawn splits, CI coverage), `claims` (verdicts, v1.3 and superseded), `stats` (formulas, bootstrap weights), `report` (figures, views, report.md) |
-| `tests/test_repro.py` | 61 unit tests: metrics vs statsmodels, recipe and cluster bootstraps, parsing, cache identity, reuse gating and reply freshness, CARE fail-closed path, sampling, end-to-end split, settings (the API key never appears in output). The notebook also runs the repo's 10 CARE tests |
-| `environment/requirements.lock.txt` | exact package versions |
-| `data/main_split.parquet`, `data/NOTICE.md` | the 549-command split and the corpus licenses (ART MIT, RedCode CC BY 4.0, NL2Bash MIT) |
-| `data/label_audit.yaml` | effect-based re-labelling of the 3 judge-changed commands (sensitivity analysis only, D17) |
-| `results/observations.parquet` | 7,686 rows (method × run × command). Each holds the decision, latency, raw LLM reply, provider, generation id, UTC timestamp, tokens, cost, and the CARE trace |
-| `results/metrics.parquet`, `comparison.parquet`, `claims.parquet` | long-format metrics with per-command CIs; reported vs observed (descriptive, with design-based CIs); claim verdicts (v1.3, with v1.1 and v1.0 alongside) |
-| `results/design_intervals.parquet`, `design_differences.parquet`, `bootstrap_coverage.parquet`, `bootstrap_calibration.parquet`, `label_sensitivity.parquet` | design-based CIs and paired differences (recipe bootstrap = primary, cluster = v1.1), the simulated interval coverage and the spread comparison, and C7/C9 label sensitivity |
-| `results/llm_request_identity.json` | executed LLM request configuration and per-condition request fingerprints; reuse is allowed only if they match (D20) |
-| `results/{mcnemar,resolution_funnel,oracle_bounds,by_source,redcode_scenarios,sensitivity_seeds,sensitivity_variants}.parquet` | secondary and diagnostic tables |
-| `results/provenance.json`, `validation.json`, `report.md`, `figures/` | provenance (sources, fingerprints, env, LLM usage, output checksums), validation summary, rendered tables, figures |
-| `results/executed/` | the live confirmatory run as executed (notebook, provenance, validation) and the clean-clone validation record |
-| `results/pilot/` | pilot runs A and B (pre-protocol), kept for transparency; not used for any claim |
+| `baseline_reproduction.ipynb` | the executable narrative, executed against the committed observations |
+| `PROTOCOL.md`, `DECISIONS.md`, `config.yaml` | protocol v2.0, the append-only decision log, the configuration (pins, fingerprints, reported values) |
+| `repro/` | `pipeline` (one function per notebook stage; start here), `sources` (pinned fetch), `dataset` (population, split recipe), `guards` (CARE, baselines, LLM client and cache), `stats` (formulas), `analysis` (tables), `claims` (verdicts), `report` (figures, views) |
+| `tests/test_repro.py` | 62 unit tests; the notebook also runs CARE's own 10 |
+| `data/population.parquet` | the 11,665 evaluated commands (licenses in `data/NOTICE.md`) |
+| `data/label_audit.yaml` | the audited labels of the 23 commands behind C7 and C9 (sensitivity analysis only) |
+| `results/observations.parquet` | 163,310 rows, one per guard, run and command: decision, latency, raw LLM reply, provider, generation id, timestamp, tokens, cost, CARE's trace |
+| `results/metrics.parquet`, `comparison.parquet`, `claims.parquet` | every metric on the full corpora and on the paper-sized splits; reported vs observed; verdicts |
+| `results/*.parquet` (others) | paired differences, Resolution funnel, oracle bounds, label sensitivity, RedCode scenarios, construction variants, run stability, consistency with v1 |
+| `results/provenance.json`, `validation.json`, `llm_request_identity.json` | sources, fingerprints, environment, LLM usage, output checksums; pass/fail checks; the executed request identity that gates reuse |
+| `results/executed/` | the notebook of the live confirmatory run, as executed, with its provenance |
+| `archive/v1/` | the superseded first version, which evaluated one 549-command sample |
+| `environment/requirements.lock.txt` | exact package versions (Python 3.12) |
 
-The PR carries the `experiment` label. A `baseline-reproduction` label does not exist in the repository and was not created (it needs the owner's go-ahead).
+## History
+
+Protocol v1 evaluated a single 549-command sample of the corpora and went through three rounds
+of external review. Protocol v2.0 replaces the sample with the full corpora; it reaches the
+same conclusion for CARE with much narrower ranges, and it finds the LLM-judge baselines
+further from the paper than the single sample suggested. Everything from v1 is kept in
+[`archive/v1/`](archive/v1/README.md).

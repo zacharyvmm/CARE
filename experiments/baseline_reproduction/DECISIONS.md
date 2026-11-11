@@ -9,6 +9,28 @@ the old one. Two kinds of entry:
 
 All dates are 2026-11-07 (UTC) unless stated.
 
+## Where things stand (index, not an entry)
+
+The current protocol is **v2.0** (`PROTOCOL.md`): every guard is run on every command of the
+corpora. Entries D1–D23 and L1–L11 were written for protocol v1, which evaluated one
+549-command sample (`archive/v1/`). This table says which of them still apply.
+
+| Entries | Topic | Status under v2.0 |
+|---|---|---|
+| D1–D4 | population rebuilt from public corpora; canonical slots; RedCode unit; real-world commands | in force |
+| D5 | NL2Bash label hygiene | in force; the commands it sets aside are now run and reported separately (D27) |
+| D6–D8 | LLM serving; NeMo emulation; baselines not run | in force |
+| D9, D10 | RedCode scenario kinds (diagnostic); conflicting labels removed | in force |
+| D11 | whole template families, no dev partition | in force for the paper-sized splits; what is *run* is now everything (D24) |
+| D12–D14 | ART snapshot; CARE unmodified; paper/code conflict | in force |
+| D15, D19, D22 | cluster bootstrap, recipe bootstrap, coverage simulation | **superseded by D25** (paper-sized splits) |
+| D16, D21, D23 | descriptive comparisons; direction-only verdicts; simultaneous comparators | in force, restated in D26 |
+| D17 | corpus-level labels; label audit for C7 and C9 | in force; extended by D28 |
+| D18, D20 | LLM cache identity; reuse gated on request identity | in force |
+| D24–D28 | full corpora; paper-sized splits; verdict rules v2.0; set-aside commands; label audit | protocol v2.0 |
+| L1–L11 | pilot, v1 confirmatory run, reviews and refactors | v1 history |
+| L12– | v2 restructure, freeze, confirmatory run | protocol v2.0 |
+
 ---
 
 ### D1: Rebuild the main split from public corpora
@@ -511,3 +533,126 @@ changes data, prompts, model, runs or metric formulas.
   both figures are **byte-identical** to the committed ones, and so are the output checksums in
   `provenance.json`. Smoke mode passed, and the live path was exercised with a stubbed LLM client. All 61 tests and
   CARE's 10 pass; two tests were updated for the new `build_split` signature.
+
+---
+
+Entries below belong to **protocol v2.0** (2026-11-11). They were written with all v1 results
+known and before any v2 result existed.
+
+### D24: Evaluate the full corpora, not a 549-command sample (protocol v2.0 §4)
+* **Change:** every guard is run on every unique command of the pinned corpora: 415 ART,
+  598 RedCode-Exec, 10,338 NL2Bash and 30 real-world commands (11,381), plus the 284 NL2Bash
+  commands set aside by D5 (D27). v1 ran one 549-command draw (seed 42) of these corpora.
+* **Rationale:** requested by the maintainer of this reproduction ("instead of using samples
+  from the datasets, run the whole thing"). A single draw made every v1 number depend on which
+  commands happened to be drawn, and most of v1's complexity (two bootstraps, a coverage
+  simulation, a seed sweep) existed only to quantify that.
+* **Expected impact:** DR and FPR per corpus become exact counts. The LLM conditions cost about
+  20 times more calls (about 106,000). No change to sources, prompts, model, parsing or metric
+  formulas.
+* **Deviation from the paper:** the paper evaluates 549 commands. The comparison with the paper
+  is therefore made on paper-sized splits (D25).
+* **Affects:** all experiments. Supersedes the sampling part of D11 for *what is run*; the
+  family recipe of D11 is kept for the paper-sized splits.
+
+### D25: Compare with the paper on paper-sized splits (protocol v2.0 §6)
+* **Change:** the paper's Table I composition is re-drawn from the population 10,000 times
+  (seeds 0–9,999) with the v1 recipe, and every statistic of the paper (F1, DR, FPR, the paired
+  differences, McNemar's test, the escalation rate) is computed on each split from the stored
+  decisions. We report the mean and the central 95% range.
+* **Rationale:** F1 depends on the class mix (9% DANGEROUS on the full corpora, 40% in the
+  paper's split), and NL2Bash is 57% `find` commands while the paper's split is head-stratified.
+  A like-for-like comparison needs the paper's composition. With decisions for every command,
+  the distribution of the paper's statistics over splits is computed directly, for every
+  condition, instead of being approximated by a bootstrap on one draw.
+* **Continuity:** the recipe is unchanged. Seed 42 regenerates the archived v1 split exactly
+  (unit-tested against `archive/v1/main_split.parquet`).
+* **Supersedes:** the design-based intervals of D15, D19 and D22 (cluster bootstrap, recipe
+  bootstrap, coverage simulation) and the 100-seed sweep, which covered static CARE only.
+* **Affects:** every comparison with the paper; C1–C6, C8, C10.
+
+### D26: Verdict rules v2.0 (protocol v2.0 §7)
+* **Change:** the v1.3 rules are kept, with the range over paper-sized splits in place of the
+  bootstrap interval:
+  * numeric claims (C1–C5, C8): *not supported (on this reconstruction)* if the reported value
+    lies outside the range, else *inconclusive (not contradicted)* (as D16);
+  * C6 and C10: direction only (as D21), C10 with ranges simultaneous over the three
+    comparators (as D23);
+  * C7 and C9: evaluated on the full corpora, under corpus-level and audited labels (as D17).
+* **Rationale:** the rules were settled over three review rounds (L8–L10); only the source of
+  variability changes. The range is a description of split-to-split variation, not a
+  confidence interval, and the protocol says so.
+* **Affects:** C1–C11.
+
+### D27: The NL2Bash commands set aside by D5 are run and reported separately
+* **Change:** the 284 NL2Bash commands that D5 does not count as SAFE are evaluated by every
+  condition. They enter no metric; their deny rate is reported, and variant V1 counts them as
+  SAFE. In v1 they were never run, and V1 existed for static CARE only.
+* **Rationale:** "run the whole thing" (D24), and it makes the effect of D5 visible for every
+  guard.
+* **Affects:** variant V1; no primary metric.
+
+### D28: Label audit on the full-corpus run
+* **Change:** the selection rule and the effect-based policy of D17 are unchanged. The audited
+  set is every DANGEROUS-labelled command that the judge allows in any v2 run, which can only
+  be listed after the run. The three v1 items stay in `data/label_audit.yaml`.
+* **Limits:** as D17. The auditor is the AI assistant that built the artifact; the audit is
+  neither blind nor independent, and it is used only for the sensitivity analysis of C7 and C9.
+* **Affects:** C7, C9.
+
+### L12: Restructure for protocol v2.0
+* **Date:** 2026-11-11.
+* **Archive:** the v1 protocol, the seed-42 split, every v1 result, the executed v1 notebooks
+  and the pilot moved to `archive/v1/` unchanged. The v1 code is in git history at `9fb29f7`.
+* **Code:**
+  * `dataset.py` loads the population and holds the split recipe (`SplitRecipe`);
+  * `stats.py` holds the formulas, on one set of commands or on many splits at once;
+  * `analysis.py`, `claims.py` and `report.py` are rewritten for the two views (full corpora,
+    paper-sized splits);
+  * `sensitivity.py` and both bootstraps are removed (D25).
+* **Documents:** `PROTOCOL.md` is a new, self-contained v2.0. This log stays append-only; the
+  status table at its top is an index, not an entry.
+
+### L13: Protocol v2.0 frozen
+* **Date:** 2026-11-11, before the v2 confirmatory run and before any guard had been run on
+  the full corpora. The pipeline had been exercised only on 40 commands with a stubbed LLM
+  client.
+* **Record:** the SHA-256 of `PROTOCOL.md` and of `config.yaml` at the time of the run are
+  written to `results/provenance.json` by the run itself.
+
+### L14: Confirmatory run of protocol v2.0
+* **Run:** 2026-11-11 18:19:53–18:53:33 UTC, through the notebook in `REPRO_MODE=full` with a
+  live LLM, on all 11,665 commands with three runs per LLM condition.
+* **Frozen inputs:** `PROTOCOL.md` sha256 `c4dde019…` and `config.yaml` sha256 `25bc802f…`, as
+  frozen in L13 and recorded by the run in its provenance. Neither file has changed since.
+* **Working tree:** the v2 code was not yet committed when the run executed. The provenance
+  records `repo_head = 9fb29f7` with `uncommitted_changes = true`.
+* **Volume and quality:** 105,651 calls. 0 errors, 0 retries, 0 replies taken from a cache,
+  every call served by `Amazon Bedrock`. 11,352,714 prompt and 275,254 completion tokens,
+  US$1.85.
+* **Consistency with v1:** on the 549 commands v1 evaluated, the static decisions are
+  identical, and the LLM conditions give the same decision on 98.0–99.3% of the commands.
+* **Archive:** `results/executed/confirmatory_live_run.{ipynb,provenance.json,validation.json}`.
+
+### L15: Label audit and final execution
+* **Label audit (D28):** the judge allowed 23 DANGEROUS-labelled commands in at least one run
+  (2 ART base64 round-trips and 21 RedCode-Exec scripts from the scenarios we call
+  software-weakness). All 23 only compute and print a value, and are audited SAFE under the
+  effect-based policy (`data/label_audit.yaml`). Twelve of them implement biased scoring rules;
+  the policy judges what running a command does, and says so.
+* **Effect on verdicts:** the live notebook (L14) was executed with only the three v1 audit
+  items and printed C7 and C9 as *not supported*. With the 23 items they are *inconclusive
+  (label-sensitive)*, as the rule in protocol §7 prescribes. No other verdict depends on the
+  audit.
+* **Code changes after the live run (no effect on any verdict):**
+  * display only: column names in three report views, and a message for empty tables;
+  * CARE's call rate on the full corpora now uses the primary population as its denominator
+    (220 / 11,381 = 1.93%). The live run divided by all evaluated commands, including the 284
+    set aside (222 / 11,665 = 1.90%). The value is descriptive.
+* **Final execution:** the notebook was re-executed without a key (reuse mode).
+  `observations.parquet` is byte-identical to the live run's, and so are the comparison,
+  paired-difference, funnel, oracle, RedCode, stability, variant and v1-consistency tables.
+  `metrics`, `claims` and `label_sensitivity` differ only for the reasons above. Two consecutive
+  re-executions produced byte-identical tables, report and figures.
+* **Not done:** a clean-clone validation (the changes are not committed yet) and an external
+  review of protocol v2.0.

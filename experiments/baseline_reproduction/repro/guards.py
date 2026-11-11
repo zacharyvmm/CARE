@@ -1,4 +1,4 @@
-"""Guards evaluated on the split (paper Sec. IV-C, prompts verbatim from Appendix E).
+"""Guards evaluated on the population (paper Sec. IV-C, prompts verbatim from Appendix E).
 
     NoGuard                 allow everything
     CARE (w/o Resolution)   care.CARE(use_judge=False)   static, deterministic
@@ -122,23 +122,29 @@ class PinnedClient:
 
 
 # ------------------------------------------------------------ methods
-def run_static(split):
-    """NoGuard and CARE (w/o Resolution), with CARE's full static trace."""
+def run_static(commands):
+    """NoGuard and CARE (w/o Resolution) on every row of `commands`, with CARE's full static trace."""
     eng, guard = CAREEngine(), CARE(use_judge=False)
-    for c in split.command[:20]:  # warm-up: imports, regex compilation
+    for c in commands.command[:20]:  # warm-up: imports, regex compilation
         guard.analyze(c)
     rows = []
-    for r in split.itertuples():
+    for r in commands.itertuples():
         st = eng.analyze(r.command)
         out = guard.analyze(r.command)
         skip = guard._should_skip_llm(st)[1] if st.decision == "WARN" else None
         trace = dict(provisional=st.decision, score=st.score, triggered=",".join(st.triggered_layers),
                      fired_rules=",".join(m["rule_id"] for m in st.fired_rules), skip_predicate=skip)
-        rows.append(dict(condition="NoGuard", rep=1, command_id=r.command_id, decision="ALLOW",
+        rows.append(dict(condition="NoGuard", run=1, command_id=r.command_id, decision="ALLOW",
                          latency_ms=0.0, llm_called=False))
-        rows.append(dict(condition="CARE (w/o Resolution)", rep=1, command_id=r.command_id,
+        rows.append(dict(condition="CARE (w/o Resolution)", run=1, command_id=r.command_id,
                          decision=out["decision"], latency_ms=out["latency_ms"], llm_called=False, **trace))
     return rows
+
+
+def static_deny(commands):
+    """CARE (w/o Resolution) DENY decision for each command string."""
+    guard = CARE(use_judge=False)
+    return [guard.analyze(c)["decision"] == "DENY" for c in commands]
 
 
 def _care_source_sha():
@@ -174,7 +180,7 @@ class _Cache:
         if os.path.exists(path):
             for ln in open(path):
                 r = json.loads(ln)
-                self.rows[(r["condition"], r["rep"], r["command_id"], r.get("request_fingerprint"))] = r
+                self.rows[(r["condition"], r["run"], r["command_id"], r.get("request_fingerprint"))] = r
 
     def get(self, key):
         return self.rows.get(key)
@@ -184,8 +190,8 @@ class _Cache:
             f.write(json.dumps(row) + "\n")
 
 
-def run_llm(split, cfg, api_key, reps, cache_path, progress=print):
-    """All LLM conditions x reps.  Resumable via an append-only JSONL cache.
+def run_llm(commands, cfg, api_key, runs, cache_path, progress=print):
+    """Every LLM condition on every row of `commands`, `runs` times.  Resumable via an append-only JSONL cache.
 
     Every returned row carries `model` and `request_fingerprint` as sent, and
     `from_cache` (True when the reply was reused from an earlier call).
@@ -197,16 +203,16 @@ def run_llm(split, cfg, api_key, reps, cache_path, progress=print):
     care_guard = CARE(use_judge=True, model=model, base_url=cfg["endpoint"], api_key="unused")
     care_guard._client = client
 
-    def care_one(rep, r):
+    def care_one(run, r):
         out = care_guard.analyze(r.command)  # error -> DENY inside CARE (fail-closed)
         meta = client.last if out["escalated"] else {}
         client.reset()
-        return dict(condition="CARE", rep=rep, command_id=r.command_id, decision=out["decision"],
+        return dict(condition="CARE", run=run, command_id=r.command_id, decision=out["decision"],
                     latency_ms=out["latency_ms"], llm_called=out["escalated"],
                     raw_response=out.get("escalate_answer"), error=out.get("escalate_error"),
                     skip_predicate=out.get("skip_reason"), score=out["score"], **meta)
 
-    def baseline_one(name, rep, r):
+    def baseline_one(name, run, r):
         build, parse = LLM_BASELINES[name]
         t0 = time.perf_counter()
         try:
@@ -218,15 +224,15 @@ def run_llm(split, cfg, api_key, reps, cache_path, progress=print):
             ans, err, deny = None, str(e), False
         meta = client.last
         client.reset()
-        return dict(condition=name, rep=rep, command_id=r.command_id, decision="DENY" if deny else "ALLOW",
+        return dict(condition=name, run=run, command_id=r.command_id, decision="DENY" if deny else "ALLOW",
                     latency_ms=(time.perf_counter() - t0) * 1000, llm_called=True,
                     raw_response=ans, error=err, **meta)
 
-    def task(name, rep, r):
-        key = (name, rep, r.command_id, fingerprints[name])
+    def task(name, run, r):
+        key = (name, run, r.command_id, fingerprints[name])
         if (hit := cache.get(key)) is not None:
             return dict(hit, from_cache=True)
-        row = care_one(rep, r) if name == "CARE" else baseline_one(name, rep, r)
+        row = care_one(run, r) if name == "CARE" else baseline_one(name, run, r)
         if row["llm_called"]:
             row.update(model=model, request_fingerprint=fingerprints[name])
             cache.put(row)  # only network results need caching; CARE's static path is recomputed
@@ -234,28 +240,34 @@ def run_llm(split, cfg, api_key, reps, cache_path, progress=print):
 
     rows = []
     with ThreadPoolExecutor(cfg["workers"]) as ex:
-        for rep in range(1, reps + 1):
+        for run in range(1, runs + 1):
             for name in LLM_METHODS:
-                rows += list(ex.map(lambda r: task(name, rep, r), split.itertuples()))
-                progress(f"run {rep}/{reps} {name}: done ({len(split)} commands)")
+                rows += list(ex.map(lambda r: task(name, run, r), commands.itertuples()))
+                progress(f"run {run}/{runs} {name}: done ({len(commands):,} commands)")
     return rows
 
 
-def to_observations(rows, split, run_label, model, split_seed):
-    obs = pd.DataFrame(rows).merge(split[["command_id", "source", "label", "label_dangerous"]], on="command_id")
-    obs.insert(0, "run_id", run_label + "-r" + obs.rep.astype(str))
-    obs["split_seed"] = split_seed
+OBSERVATION_COLUMNS = [
+    # which decision this is
+    "run_id", "run", "condition", "command_id", "source", "label", "label_dangerous", "in_primary",
+    # the decision
+    "decision", "prediction_dangerous", "latency_ms",
+    # the LLM call behind it, if any
+    "llm_called", "model", "provider", "generation_id", "request_utc", "api_latency_ms", "attempts",
+    "prompt_tokens", "completion_tokens", "cost_usd", "finish_reason", "raw_response", "error",
+    "request_fingerprint", "from_cache",
+    # CARE's static trace
+    "provisional", "score", "triggered", "fired_rules", "skip_predicate",
+]
+
+
+def to_observations(rows, commands, run_label):
+    """One row per (condition, run, command): the decision, its LLM call and CARE's trace."""
+    obs = pd.DataFrame(rows).merge(commands[["command_id", "source", "label", "label_dangerous", "in_primary"]],
+                                   on="command_id")
+    obs.insert(0, "run_id", run_label + "-r" + obs.run.astype(str))
     obs["prediction_dangerous"] = obs.decision.eq("DENY")
-    # the model recorded with each reply when it was requested; older rows without it fall back to the config
-    recorded = obs["model"] if "model" in obs else pd.Series(None, index=obs.index, dtype=object)
-    obs["model"] = recorded.where(recorded.notna(), obs.llm_called.map({True: model, False: None}))
-    cols = ["run_id", "rep", "split_seed", "condition", "command_id", "source", "label", "label_dangerous",
-            "decision", "prediction_dangerous", "latency_ms", "llm_called", "model", "provider",
-            "generation_id", "request_utc", "api_latency_ms", "attempts", "prompt_tokens",
-            "completion_tokens", "cost_usd", "finish_reason", "raw_response", "error",
-            "provisional", "score", "triggered", "fired_rules", "skip_predicate",
-            "request_fingerprint", "from_cache"]
-    for c in cols:
+    for c in OBSERVATION_COLUMNS:
         if c not in obs:
             obs[c] = None
-    return obs[cols].sort_values(["condition", "rep", "command_id"]).reset_index(drop=True)
+    return obs[OBSERVATION_COLUMNS].sort_values(["condition", "run", "command_id"]).reset_index(drop=True)

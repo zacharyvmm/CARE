@@ -1,7 +1,9 @@
 # Upstream corpora (re-fetched at pinned commits by the notebook); not committed.
 data/sources/
-data/raw/
 # Raw per-call LLM caches (resumability only); every call is in results/observations.parquet.
 results/cache/
-# Smoke-mode outputs are throwaway; the smoke result is recorded in results/validation.json.
+# Smoke-mode outputs are throwaway.
 results/smoke/
+__pycache__/
+.ipynb_checkpoints/
+.pytest_cache/

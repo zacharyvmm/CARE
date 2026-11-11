@@ -1,6 +1,6 @@
-# Frozen configuration for the CARE baseline reproduction (protocol v1.0, see PROTOCOL.md).
+# Configuration for the CARE baseline reproduction, protocol v2.0 (PROTOCOL.md).
 # Changing anything here after the confirmatory run requires a DECISIONS.md entry.
-protocol_version: "1.3"   # v1.1-v1.3 = PROTOCOL.md §11-§13 (post-confirmatory amendments after external review; D15-D23)
+protocol_version: "2.0"
 
 paper:
   title: "CARE: Pre-Execution Command Verification for Shell-Executing LLM Agents"
@@ -13,11 +13,10 @@ paper:
 
 method_under_test:
   repository: "https://github.com/prisma-research/CARE (this repo, fork zacharyvmm/CARE)"
-  commit: "9d6852e2ee79ec0ac1d6579dcfb8da0b0be5b2c2"      # care/ identical to release commit 81dd742 (2026-07-07)
-  release_commit: "81dd742"
-  patches: []                                             # CARE is run unmodified
+  release_commit: "81dd742"     # care/ must be byte-identical to this commit (checked on every run)
+  patches: []                   # CARE is run unmodified
 
-sources:   # fetched by repro.sources (sparse, blob-filtered clones at pinned commits)
+sources:   # fetched by repro.sources as sparse clones at pinned commits
   atomic-red-team:
     url: "https://github.com/redcanaryco/atomic-red-team"
     commit: "a0e3f9bc69fed2fd711bd1f1aa87a40c33482fe6"    # HEAD on 2026-11-06
@@ -36,19 +35,22 @@ sources:   # fetched by repro.sources (sparse, blob-filtered clones at pinned co
     patterns: ["data/bash/all.cm", "data/bash/all.nl", "data/bash/LICENSE"]
     license: "data/bash MIT (repository code GPL-3.0)"
     fingerprint: {n_files: 3, sha256: "679ae70ec24f6581bd3734c4b26f9adcf5c1284b2f312ec18b437067d4fa49e3"}
-  atomic-red-team-2026-03-24:   # sensitivity variant V3 only
+  atomic-red-team-2026-03-24:   # older ART snapshot, used only by construction variant V3
     url: "https://github.com/redcanaryco/atomic-red-team"
     commit: "40a54bf631ced8799676680d78eff30db90abb80"
     patterns: ["atomics/T*/T*.yaml", "LICENSE.txt"]
     license: "MIT"
     fingerprint: {n_files: 329, sha256: "09a324c21fbc405a693742631287bc793670f0a424611b818a8eff3328c52b04"}
 
-dataset:
-  seed: 42                               # paper Sec. IV-B
-  targets: {ART: 149, RedCode-Exec: 71, NL2Bash: 299, Real-world: 30}   # Table I (ART 137 + 12 canonical slots, D2)
-  nl2bash_head_cap: 12                   # Table I (stated for the RQ3 pool; inferred for the main split)
-  nl2bash_label_filter: true             # D5
+population:   # every unique command of the corpora is evaluated (PROTOCOL.md §4)
+  file: "data/population.parquet"
   real_world_file: "data/manual/real_world_commands.txt"
+
+paper_sized_splits:   # the paper's 549-command composition, re-drawn from the population (PROTOCOL.md §6)
+  composition: {ART: 149, RedCode-Exec: 71, NL2Bash: 299, Real-world: 30}   # Table I (ART 137 + 12 canonical slots, D2)
+  nl2bash_head_cap: 12       # Table I (stated for the RQ3 pool; inferred for the main split)
+  seeds: [0, 9999]           # inclusive; one split per seed
+  range_level: 0.95          # central share of splits reported as "the range"
 
 llm:
   endpoint: "https://openrouter.ai/api/v1"
@@ -57,24 +59,20 @@ llm:
   allow_fallbacks: false
   temperature: 0
   max_tokens: {CARE: 8, PromptOnly: 8, LLMJudge: 8, NeMo self-check: 4}   # App. E Prompts 1-4
-  retries: 6                              # exponential backoff 1,2,4,8,16,30 s; then method's error policy
+  retries: 6                 # exponential backoff 1,2,4,8,16,30 s; then the method's error policy
   workers: 16
-  reps: 3
+  runs: 3                    # independent runs per LLM condition
 
 analysis:
-  primary_run: 1
-  bootstrap_resamples: 10000
-  bootstrap_seed: 0
-  ci_level: 0.95
-  sensitivity_seeds: [0, 99]             # inclusive range, static guard only
-  inferential_ci: "recipe bootstrap (PROTOCOL.md §12.1 as amended by §13.1, D19, D22); v1.1 cluster bootstrap (§11.1, D15) kept for the record"
-  coverage: {eval_seeds: [0, 99], truth_seeds: [1000, 1199], resamples: 1000}   # §13.2, D22: simulated CI coverage, deterministic guards
-  label_audit: "data/label_audit.yaml"   # D17: sensitivity analysis for C7/C9 only
+  primary_run: 1             # fixed in advance; runs 2 and 3 measure serving nondeterminism
+  label_audit: "data/label_audit.yaml"   # sensitivity analysis for C7/C9 only (D17, D28)
 
-smoke:
-  per_source: 6                          # 24 commands, R = 1, written to results/smoke/
+smoke:   # REPRO_MODE=smoke: a tiny end-to-end check, never a reproduction
+  commands_per_group: 8
+  composition: {ART: 5, RedCode-Exec: 5, NL2Bash: 5, Real-world: 5}
+  seeds: [0, 199]
 
-reported:   # paper values (percent / ms); source in `cite`
+reported:   # values printed in the paper (percent / ms)
   table_ii:
     cite: "Table II (main split, 549 commands)"
     rows:
@@ -92,6 +90,7 @@ reported:   # paper values (percent / ms); source in `cite`
       - {left: CARE, right: "CARE (w/o Resolution)",      left_only: 3,   right_only: 0,  p: 0.25}
   resolution_funnel:
     cite: "Appendix A.F"
+    n: 549
     warn: 117
     skipped: 94
     escalated: 23

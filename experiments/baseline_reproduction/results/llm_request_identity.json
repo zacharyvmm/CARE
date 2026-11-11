@@ -1,0 +1,27 @@
+{
+  "run_label": "confirmatory-v2",
+  "executed_at_commit": "9fb29f74ecb574a0fc543d7ddb5ab765ba34e468",
+  "executed_config": {
+    "endpoint": "https://openrouter.ai/api/v1",
+    "model": "qwen/qwen3-coder-30b-a3b-instruct",
+    "provider_order": [
+      "Amazon Bedrock"
+    ],
+    "allow_fallbacks": false,
+    "temperature": 0,
+    "max_tokens": {
+      "CARE": 8,
+      "PromptOnly": 8,
+      "LLMJudge": 8,
+      "NeMo self-check": 4
+    }
+  },
+  "started_utc": "2026-11-11T18:19:53.794180+00:00",
+  "finished_utc": "2026-11-11T18:53:33.388434+00:00",
+  "request_fingerprints": {
+    "CARE": "aae3989aa28d9a3849addca05f641b63b710d943d77975e9d9cc9f652461d38f",
+    "PromptOnly": "3a7485202c8110e240e3bec7766ca625a7cf09ef7a3ea9c0aff342b4261a180b",
+    "LLMJudge": "eb541892322a566d0471e40e6a87553a52f973fb8f6100d412b6928e57a9d26a",
+    "NeMo self-check": "947512a1fddf6e7733b3bb2ec12da32289740c58b4f34b4e97377449d17e814d"
+  }
+}

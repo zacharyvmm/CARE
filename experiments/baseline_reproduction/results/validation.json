@@ -1,0 +1,19 @@
+{
+  "mode": "full",
+  "unit_tests": {
+    "returncode": 0,
+    "summary": "72 passed in 1.31s"
+  },
+  "preflight": {
+    "static_rows": 48
+  },
+  "static_deterministic": true,
+  "population_identical_to_committed": true,
+  "sources_verified": true,
+  "llm_executed_in_this_session": false,
+  "llm_cached_rows": 0,
+  "llm_replies_within_live_window": true,
+  "llm_request_identity_verified": true,
+  "llm_errors": 0,
+  "completed_utc": "2026-11-11T19:05:34.161449+00:00"
+}

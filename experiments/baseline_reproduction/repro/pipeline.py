@@ -1,72 +1,73 @@
 """The reproduction pipeline, one function per notebook stage.
 
-`baseline_reproduction.ipynb` calls these in order; reading this file top to
-bottom is reading the experiment:
+`baseline_reproduction.ipynb` calls these in order; reading this file top to bottom is reading
+the experiment:
 
-    run             = settings(cfg)                          # mode, LLM live or reused, output dir
-    integrity       = check_environment(cfg)                 # care/ unmodified, versions recorded
-    tests           = run_unit_tests()
-    sources         = fetch_sources(cfg)                     # corpora at pinned commits
-    pools           = load_pools(cfg, sources.roots)         # every candidate command per corpus
-    split, manifest = rebuild_split(cfg, pools, run)         # the 549 commands
-    smoke           = preflight(split, cfg, run)
-    static_rows     = run_static_guards(split)               # NoGuard, CARE (w/o Resolution)
-    obs, llm_run    = query_llm_guards(...)                  # live, or:
-                      reuse_llm_observations(...)            #   committed run, verified
-    results         = analyse(obs, split, pools, sources, cfg, run)
-    paths           = export(results, report_md, run)
+    run                  = settings(cfg)                         # mode, LLM live or reused, output dir
+    integrity            = check_environment(cfg)                # care/ unmodified, versions recorded
+    tests                = run_unit_tests()
+    sources              = fetch_sources(cfg)                    # corpora at pinned commits
+    population, manifest = load_population(cfg, sources, run)    # every command of every corpus
+    checks               = preflight(population, cfg, run)
+    static_rows          = run_static_guards(population)         # NoGuard, CARE (w/o Resolution)
+    obs, llm_run         = query_llm_guards(...)                 # CARE + 3 LLM judges, live, or:
+                           reuse_llm_observations(...)           #   the committed run, verified
+    splits               = draw_paper_sized_splits(population, cfg, run)
+    results              = analyse(obs, population, splits, sources, manifest, cfg, run)
+    paths                = export(results, report_md, run)
     write_provenance(...)
 
-Every stage takes the data it needs as arguments and returns what it produced.
-The work itself lives in
+Every stage takes the data it needs as arguments and returns what it produced.  The work itself
+lives in
 
-    dataset      corpora -> candidate pools -> split
-    guards       CARE and the LLM-judge baselines, the pinned LLM client and its cache
-    analysis     observations -> metrics, design-based CIs, diagnostics
-    sensitivity  static CARE on re-drawn splits: seed sweep, variants, CI coverage
-    claims       verdicts C1-C11 (v1.3, with the superseded rule sets alongside)
-    stats        the formulas: metrics, Wilson, McNemar, bootstrap weights
-    report       figures, views, report.md
+    dataset    corpora -> population; the paper's split recipe
+    guards     CARE and the LLM-judge baselines, the pinned LLM client and its cache
+    analysis   observations -> metrics on the full corpora and on paper-sized splits, diagnostics
+    claims     verdicts C1-C11
+    stats      the formulas
+    report     figures, views, report.md
 """
 from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import hashlib
 import json
 import os
 import platform
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from . import HERE, REPO
 from . import analysis as A
 from . import claims as C
 from . import dataset as D
 from . import guards as G
-from . import sensitivity as SENS
 from . import sources as SRC
 
 KEY_PACKAGES = ["pandas", "pyarrow", "numpy", "scipy", "statsmodels", "openai", "bashlex", "PyYAML", "matplotlib"]
-SKIP_IN_INVENTORY = ("data/sources", "data/raw", "results/cache", "results/smoke", "__pycache__",
+SKIP_IN_INVENTORY = ("data/sources", "results/cache", "results/smoke", "archive", "__pycache__",
                      ".ipynb_checkpoints", ".pytest_cache")
+V1_OBSERVATIONS = os.path.join(HERE, "archive/v1/results/observations.parquet")
 
 
 # ---------------------------------------------------------------- run settings
 @dataclass(frozen=True)
 class Run:
-    """How this execution runs. Built from environment variables by `settings`."""
-    mode: str           # "full" (the protocol) or "smoke" (24 commands, 1 run)
+    """How this execution runs.  Built from environment variables by `settings`."""
+    mode: str           # "full" (the protocol) or "smoke" (a few commands, 1 run)
     run_llm: bool       # query the LLM live; otherwise reuse the committed observations
     out: str            # output directory
     label: str          # run_id prefix in observations
-    reps: int           # runs per LLM condition
-    split_name: str
+    runs: int           # runs per LLM condition
     api_key: str | None = field(default=None, repr=False)  # never printed or written
 
     @property
@@ -82,9 +83,8 @@ def settings(cfg, environ=os.environ):
     run = Run(mode=mode,
               run_llm=key is not None and environ.get("REPRO_REUSE_LLM", "0") != "1",
               out=os.path.join(HERE, "results" if full else "results/smoke"),
-              label="confirmatory-v1" if full else "smoke",
-              reps=cfg["llm"]["reps"] if full else 1,
-              split_name="reconstructed-main-seed42" if full else "smoke-24",
+              label="confirmatory-v2" if full else "smoke-v2",
+              runs=cfg["llm"]["runs"] if full else 1,
               api_key=key)
     os.makedirs(run.out, exist_ok=True)
     return run
@@ -143,7 +143,8 @@ def check_environment(cfg):
     print(f"✓ care/ identical to release {release} (patches: {cfg['method_under_test']['patches']})")
     print("✓ package versions match the lockfile" if not env["lockfile_mismatches"] else
           f"⚠ versions differ from the lockfile: {env['lockfile_mismatches']}")
-    return dict(environment=env, repo_head=_sh("git", "rev-parse", "HEAD"))
+    return dict(environment=env, repo_head=_sh("git", "rev-parse", "HEAD"),
+                uncommitted_changes=bool(_sh("git", "status", "--porcelain", "--", os.path.relpath(HERE, REPO))))
 
 
 def run_unit_tests():
@@ -159,9 +160,9 @@ def run_unit_tests():
 # ---------------------------------------------------------------- stage 2: data
 @dataclass
 class Sources:
-    records: dict   # name -> url, commit, license, fingerprint, verified
-    roots: dict     # corpus directories for the primary split
-    roots_v3: dict  # same, with the 2026-03-24 ART snapshot (variant V3)
+    records: dict        # name -> url, commit, license, fingerprint, verified
+    roots: dict          # corpus directories
+    older_art_root: str  # the 2026-03-24 ART snapshot (construction variant V3)
 
 
 def fetch_sources(cfg):
@@ -175,113 +176,103 @@ def fetch_sources(cfg):
         print(f"{'✓' if ok else '✗'} {name:28s} {spec['commit'][:10]}  {fp['n_files']:4d} files  sha256 {fp['sha256'][:16]}…")
     assert all(r["verified"] for r in records.values()), "source fingerprint mismatch"
     roots = dict(art=f"{root}/atomic-red-team", redcode=f"{root}/RedCode", nl2bash=f"{root}/nl2bash")
-    return Sources(records, roots, dict(roots, art=f"{root}/atomic-red-team-2026-03-24"))
+    return Sources(records, roots, f"{root}/atomic-red-team-2026-03-24")
 
 
-def load_pools(cfg, roots, label_filter=None):
-    """Every candidate command per corpus (label filter from the config unless given)."""
-    ds = cfg["dataset"]
-    return D.load_pools(roots, os.path.join(HERE, ds["real_world_file"]),
-                        ds["nl2bash_label_filter"] if label_filter is None else label_filter)
-
-
-def rebuild_split(cfg, pools, run):
-    """Rebuild the seed-42 split and require it to equal the committed `data/main_split.parquet`."""
-    ds = cfg["dataset"]
-    split, manifest = D.build_split(pools, ds["seed"], ds["targets"], ds["nl2bash_head_cap"])
-    D.validate_split(split, ds["targets"])
-    committed = pd.read_parquet(os.path.join(HERE, "data/main_split.parquet"))
-    assert committed.equals(split[committed.columns]), "rebuilt split differs from data/main_split.parquet"
-    print(f"✓ split rebuilt: {manifest['n']} commands, identical to data/main_split.parquet")
+def load_population(cfg, sources, run):
+    """Every command of every corpus, rebuilt from the sources and required to equal `data/population.parquet`."""
+    p = cfg["population"]
+    population, manifest = D.load_population(sources.roots, os.path.join(HERE, p["real_world_file"]))
+    committed = pd.read_parquet(os.path.join(HERE, p["file"]))
+    assert committed.equals(population[committed.columns]), f"rebuilt population differs from {p['file']}"
+    print(f"✓ population rebuilt: {len(population):,} commands, identical to {p['file']}")
     if not run.full:
-        split = split.groupby("source").head(cfg["smoke"]["per_source"]).reset_index(drop=True)
-        print(f"  SMOKE: continuing with {len(split)} commands")
-    return split, manifest
+        k = cfg["smoke"]["commands_per_group"]
+        population = population.groupby(["source", "in_primary"], sort=False).head(k).reset_index(drop=True)
+        print(f"  SMOKE: continuing with {len(population)} commands")
+    return population, manifest
 
 
-def preflight(split, cfg, run):
+def preflight(population, cfg, run):
     """Exercise every execution path once before the real run (results are thrown away)."""
-    sample = split.groupby("source").head(6)
+    sample = population.groupby("source").head(6)
     static_rows = G.run_static(sample)
     assert len(static_rows) == 2 * len(sample)
-    smoke = dict(static_rows=len(static_rows))
+    checks = dict(static_rows=len(static_rows))
     if run.run_llm:
-        rows = G.run_llm(sample.head(1), cfg["llm"], run.api_key, 1,
-                         os.path.join(HERE, "results/cache/preflight.jsonl"), progress=lambda *_: None)
-        smoke["llm_preflight"] = {r["condition"]: (r["decision"], r.get("error")) for r in rows}
-        assert all(r.get("error") is None for r in rows), smoke
-    print("✓ preflight:", smoke)
-    return smoke
+        with tempfile.TemporaryDirectory() as scratch:   # no cache: every preflight call is a real call
+            rows = G.run_llm(sample.head(1), cfg["llm"], run.api_key, 1,
+                             os.path.join(scratch, "preflight.jsonl"), progress=lambda *_: None)
+        checks["llm_preflight"] = {r["condition"]: (r["decision"], r.get("error")) for r in rows}
+        assert all(r.get("error") is None for r in rows), checks
+    print("✓ preflight:", checks)
+    return checks
 
 
 # ---------------------------------------------------------------- stage 3: run the guards
-def run_static_guards(split):
+def run_static_guards(population):
     """NoGuard and CARE (w/o Resolution), run twice to check that they are deterministic."""
-    rows = G.run_static(split)
+    rows = G.run_static(population)
     key = lambda rs: [(r["condition"], r["command_id"], r["decision"], r.get("score")) for r in rs]  # noqa: E731
-    assert key(rows) == key(G.run_static(split)), "static guards are not deterministic"
-    print(f"✓ static guards: {len(rows)} decisions, identical across two passes")
+    assert key(rows) == key(G.run_static(population)), "static guards are not deterministic"
+    print(f"✓ static guards: {len(rows):,} decisions, identical across two passes")
     return rows
 
 
-def query_llm_guards(split, static_rows, cfg, run):
-    """CARE (with Resolution) and the three LLM-judge baselines, `run.reps` times each, queried live.
+def query_llm_guards(population, static_rows, cfg, run):
+    """CARE (with Resolution) and the three LLM-judge baselines, `run.runs` times each, queried live.
 
     Writes `observations.parquet` and `llm_request_identity.json` (what was requested, so that a
-    later reuse can verify it).  Replies reused from the resumability cache are counted (`cached_rows`).
+    later reuse can verify it).  A run that is interrupted resumes from its call cache; replies
+    taken from the cache are counted (`cached_rows`) and keep their original request time.
     """
-    started = _utc_now()
-    llm_rows = G.run_llm(split, cfg["llm"], run.api_key, run.reps,
+    session_start = _utc_now()
+    llm_rows = G.run_llm(population, cfg["llm"], run.api_key, run.runs,
                          os.path.join(HERE, "results/cache", f"{run.label}.jsonl"))
-    finished = _utc_now()
-    obs = _to_observations(static_rows + llm_rows, split, cfg, run)
-    obs.to_parquet(os.path.join(run.out, "observations.parquet"), index=False)
-    identity = dict(run_label=run.label, schema="per-row request_fingerprint and from_cache (D18)",
-                    how_established="recorded at execution", executed_at_commit=_sh("git", "rev-parse", "HEAD"),
-                    executed_config=_request_config(cfg["llm"]), started_utc=started, finished_utc=finished,
+    obs = G.to_observations(static_rows + llm_rows, population, run.label)
+    obs.to_parquet(os.path.join(run.out, "observations.parquet"), index=False, compression="zstd")
+    requested = pd.to_datetime(obs.request_utc.dropna(), utc=True)
+    window = dict(started_utc=min(pd.Timestamp(session_start), requested.min()).isoformat(), finished_utc=_utc_now())
+    identity = dict(run_label=run.label, executed_at_commit=_sh("git", "rev-parse", "HEAD"),
+                    executed_config=_request_config(cfg["llm"]), **window,
                     request_fingerprints={c: G.request_fingerprint(cfg["llm"], c) for c in G.LLM_METHODS})
     json.dump(identity, open(os.path.join(run.out, "llm_request_identity.json"), "w"), indent=2)
     cached = sum(bool(r.get("from_cache")) and r["llm_called"] for r in llm_rows)
-    llm_run = dict(executed=True, started_utc=started, finished_utc=finished,
-                   executed_in_this_session=cached < sum(r["llm_called"] for r in llm_rows), cached_rows=cached)
+    llm_run = dict(executed=True, **window, cached_rows=cached,
+                   executed_in_this_session=cached < sum(r["llm_called"] for r in llm_rows))
     return obs, dict(llm_run, **_llm_usage(obs))
 
 
-def reuse_llm_observations(split, static_rows, cfg, run):
+def reuse_llm_observations(population, static_rows, cfg, run):
     """The committed observations of the live confirmatory run, verified rather than re-queried.
 
     Checks that (a) the static decisions just re-executed equal the committed ones, (b) today's
-    requests (model, serving, decoding, prompts) are identical to the executed ones (D20), and
-    (c) every committed LLM reply was requested inside the live run's time window with a unique
-    generation id (no stale replies).  Smoke mode keeps the smoke subset and run 1.
+    requests (model, serving, decoding, prompts) are identical to the executed ones, and (c) every
+    committed LLM reply was requested inside the live run's time window, with a unique generation
+    id and the executed request fingerprint.  Smoke mode keeps its few commands and run 1.
     """
     committed_path = os.path.join(HERE, "results", "observations.parquet")
     assert os.path.exists(committed_path), "no API key and no committed observations: LLM conditions cannot be evaluated"
     obs = pd.read_parquet(committed_path)
-    assert obs.run_id.str.startswith("confirmatory-v1").all(), "committed observations are not from this protocol's run"
+    assert obs.run_id.str.startswith("confirmatory-v2").all(), "committed observations are not from this protocol's run"
     if not run.full:
-        obs = obs[obs.command_id.isin(split.command_id) & (obs.rep == 1)].reset_index(drop=True)
-        obs.to_parquet(os.path.join(run.out, "observations.parquet"), index=False)
+        obs = obs[obs.command_id.isin(population.command_id) & (obs.run == 1)].reset_index(drop=True)
+        obs.to_parquet(os.path.join(run.out, "observations.parquet"), index=False, compression="zstd")
     identity = json.load(open(os.path.join(HERE, "results", "llm_request_identity.json")))
     window = dict(started_utc=identity["started_utc"], finished_utc=identity["finished_utc"])
 
-    _assert_static_matches(_to_observations(static_rows, split, cfg, run), obs)
+    _assert_static_matches(G.to_observations(static_rows, population, run.label), obs)
     _assert_same_requests(identity, obs, cfg["llm"])
     _assert_replies_from_live_run(obs, window)
 
     print("✓ static decisions identical to the committed observations; LLM observations reused (not re-queried)")
-    print("✓ requested model, serving, decoding and prompts are identical to those of the executed run "
-          f"(request fingerprints; {identity['how_established'][:40]}…)")
+    print("✓ requested model, serving, decoding and prompts are identical to those of the executed run")
     print(f"✓ all committed LLM replies were requested during the live run "
           f"({window['started_utc'][:19]} – {window['finished_utc'][:19]} UTC), with unique generation ids")
     llm_run = dict(executed=True, **window, executed_in_this_session=False, cached_rows=0,
                    reused_from=os.path.relpath(committed_path, HERE), replies_within_live_window=True,
-                   request_identity_verified=True, request_identity_how=identity["how_established"])
+                   request_identity_verified=True)
     return obs, dict(llm_run, **_llm_usage(obs))
-
-
-def _to_observations(rows, split, cfg, run):
-    return G.to_observations(rows, split, run.label, cfg["llm"]["model"], cfg["dataset"]["seed"])
 
 
 REQUEST_KEYS = ("endpoint", "model", "provider_order", "allow_fallbacks", "temperature", "max_tokens")
@@ -300,14 +291,16 @@ def _assert_same_requests(identity, obs, llm_cfg):
     llm = obs[obs.llm_called == True]  # noqa: E712
     assert (llm.model == identity["executed_config"]["model"]).all(), "observations record a different model"
     assert llm.provider.isin(identity["executed_config"]["provider_order"]).all(), "a reply came from an unpinned provider"
+    assert (llm.request_fingerprint == llm.condition.map(identity["request_fingerprints"])).all(), (
+        "a reply was produced by a different request than the one recorded for its condition")
 
 
-def _assert_replies_from_live_run(obs, llm_run):
+def _assert_replies_from_live_run(obs, window):
     llm = obs[obs.llm_called == True]  # noqa: E712
     t = pd.to_datetime(llm.request_utc, utc=True)
     assert t.notna().all() and llm.generation_id.notna().all(), "LLM replies without request metadata"
     assert llm.generation_id.is_unique, "duplicate generation ids: replies were reused across requests"
-    lo, hi = pd.Timestamp(llm_run["started_utc"]), pd.Timestamp(llm_run["finished_utc"])
+    lo, hi = pd.Timestamp(window["started_utc"]), pd.Timestamp(window["finished_utc"])
     assert ((t >= lo) & (t <= hi)).all(), "some LLM replies predate or postdate the recorded live run"
 
 
@@ -329,144 +322,159 @@ def _llm_usage(obs):
 def describe_llm_run(llm_run):
     when = "executed in this session" if llm_run["executed_in_this_session"] else \
         f"reused from the live run of {llm_run.get('started_utc', '?')[:19]} UTC"
-    providers = ", ".join(f"{p} ({n})" for p, n in llm_run["providers"].items())
+    providers = ", ".join(f"{p} ({n:,})" for p, n in llm_run["providers"].items())
     return (f"**LLM calls:** {llm_run['calls']:,} ({when}); **errors:** {llm_run['errors']}; "
             f"**retried:** {llm_run['retried_calls']}; **served by:** {providers}; "
             f"**tokens:** {llm_run['prompt_tokens']:,} prompt + {llm_run['completion_tokens']:,} completion; "
-            f"**cost:** US${llm_run['cost_usd']:.4f}")
+            f"**cost:** US${llm_run['cost_usd']:.2f}")
 
 
 def _utc_now():
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
-# ---------------------------------------------------------------- stage 4: analysis
+# ---------------------------------------------------------------- stage 4: paper-sized splits
+@dataclass
+class Splits:
+    """Splits with the paper's composition, re-drawn from the population (one per seed)."""
+    seeds: range
+    composition: dict
+    level: float       # central share of the splits reported as "the range"
+    draws: dict        # source -> (n_splits, quota) row positions into the population
+
+    @property
+    def matrix(self):
+        return D.as_matrix(self.draws)
+
+    def __len__(self):
+        return len(self.seeds)
+
+
+def draw_paper_sized_splits(population, cfg, run):
+    """Re-draw the paper's 549-command composition from the population, once per seed."""
+    ps = cfg["paper_sized_splits"]
+    composition = ps["composition"] if run.full else cfg["smoke"]["composition"]
+    first, last = ps["seeds"] if run.full else cfg["smoke"]["seeds"]
+    seeds = range(first, last + 1)
+    draws = D.SplitRecipe(population, composition, ps["nl2bash_head_cap"]).draw(seeds)
+    splits = Splits(seeds, composition, ps["range_level"], draws)
+    y = population.label_dangerous.to_numpy()[splits.matrix]
+    print(f"✓ {len(splits):,} splits of {splits.matrix.shape[1]} commands "
+          f"({int(y[0].sum())} DANGEROUS / {int((~y[0]).sum())} SAFE each)")
+    return splits
+
+
+# ---------------------------------------------------------------- stage 5: analysis
 @dataclass
 class Results:
-    # what each guard decided
-    metrics: pd.DataFrame          # long format, every condition x run x metric, with per-command CIs
-    # design-based inference on the primary run
-    design: A.Design               # recipe bootstrap (v1.3, D19, D22): intervals, differences, escalation
-    comparison: pd.DataFrame       # reported vs observed (Table II), descriptive
-    claims: pd.DataFrame           # C1-C11: v1.3 verdicts, with the v1.2-rule, v1.1 and v1.0 outcomes alongside
-    # diagnostics on this population
-    mcnemar: pd.DataFrame          # per-command paired tests, as in the paper (Table VIII)
-    funnel: pd.DataFrame           # Resolution funnel (App. A.F)
-    oracle: pd.DataFrame           # upper bounds for any Resolution judge
-    by_source: pd.DataFrame
-    redcode: pd.DataFrame
-    label_sensitivity: pd.DataFrame  # C7/C9 under corpus-level vs audited labels (D17)
-    # split construction (static CARE on re-drawn splits; full mode only, else None)
-    seeds: pd.DataFrame | None     # seed sweep
-    variants: pd.DataFrame | None  # construction variants V0-V3
-    coverage: pd.DataFrame | None  # simulated coverage of the bootstrap intervals (D22)
-    calibration: pd.DataFrame | None  # bootstrap spread vs spread over re-drawn splits (D19)
-    # superseded, kept for the record
-    design_v11: A.Design           # v1.1 cluster bootstrap (D15)
+    metrics: pd.DataFrame            # long format: every condition x run x metric, on the full corpora and on the splits
+    comparison: pd.DataFrame         # Table II, reported vs observed
+    differences: pd.DataFrame        # CARE vs each comparator on the paper-sized splits (Table VIII, C6, C10)
+    claims: pd.DataFrame             # verdicts C1-C11
+    # diagnostics
+    funnel: pd.DataFrame             # Resolution funnel (App. A.F)
+    oracle: pd.DataFrame             # upper bounds for any Resolution judge
+    label_sensitivity: pd.DataFrame  # C7/C9 under corpus-level vs audited labels
+    redcode: pd.DataFrame            # denied commands per RedCode scenario
+    stability: pd.DataFrame          # run-to-run variation of the LLM conditions
+    variants: pd.DataFrame | None    # construction variants V0-V3 (full mode only)
+    v1: pd.DataFrame | None          # consistency with the archived v1 run (full mode only)
+    # for the figures
+    split_f1: dict                   # condition -> F1 of every paper-sized split
+    n_splits: int
 
 
-def analyse(obs, split, pools, sources, cfg, run):
-    """Every analysis table (§6-§8), from the observations, the split and the corpora."""
-    # 1. What each guard decided: point metrics per condition and run
-    metrics = A.metrics_long(obs, split, cfg, split_name=run.split_name)
+def analyse(obs, population, splits, sources, manifest, cfg, run):
+    """Every analysis table, from the observations, the population and the paper-sized splits."""
+    o = A.Observed(obs, population)
+    matrix, level = splits.matrix, splits.level
 
-    # 2. Design-based uncertainty: re-run the split recipe on the sample (v1.3)
-    weights = A.recipe_weights(split, cfg, order=D.corpus_order(split, pools))
-    design = A.design_inference(obs, split, weights, "recipe", cfg)
-    design_v11 = A.design_inference(obs, split, A.cluster_weights(split, cfg), "cluster", cfg)   # superseded
+    # 1. What each guard decided: on the full corpora, and on the paper-sized splits
+    metrics = pd.concat([A.corpus_metrics(o), A.split_metrics(o, matrix, level)], ignore_index=True)
 
-    # 3. Reported vs observed, and the paper's own per-command tests
-    comparison = A.compare_with_paper(metrics, design.intervals, cfg)
-    mcnemar = A.mcnemar_table(obs, split, cfg)
+    # 2. Reported vs observed, and CARE against each comparator
+    comparison = A.compare_with_paper(metrics, cfg)
+    differences = A.paired_differences(o, matrix, cfg)
 
-    # 4. Diagnostics on this population
-    funnel = A.resolution_funnel(obs, split)
-    oracle = A.oracle_bounds(obs, split)
-    by_source = A.by_source(obs, split)
-    redcode, redcode_items = A.redcode_scenarios(obs, split)
-    label_sens = A.label_sensitivity(obs, split, load_label_audit())
+    # 3. Resolution: what the judge sees, what any judge could achieve, and how much the labels matter
+    funnel = A.resolution_funnel(o, matrix, cfg)
+    oracle = A.oracle_bounds(o, matrix, level)
+    label_sens = A.label_sensitivity(o, load_label_audit(cfg))
 
-    # 5. Split construction: static CARE on re-drawn splits (deterministic, full mode only)
-    seeds = variants = coverage = calibration = None
+    # 4. Diagnostics
+    redcode = A.redcode_scenarios(o)
+    stability = A.run_stability(o, metrics)
+    variants = v1 = None
     if run.full:
-        care = SENS.StaticCARE()
-        seeds = SENS.seed_sweep(pools, cfg, care)
-        variants = SENS.construction_variants(split, redcode_items, pools,
-                                              pools_unfiltered=load_pools(cfg, sources.roots, label_filter=False),
-                                              pools_v3=load_pools(cfg, sources.roots_v3), cfg=cfg, care=care)
-        coverage = SENS.bootstrap_coverage(pools, cfg, care)
-        calibration = SENS.bootstrap_calibration(pd.concat([design.intervals, design_v11.intervals]), seeds)
+        variants = A.construction_variants(o, cfg, splits.seeds, splits.draws, older_art_snapshot(sources, manifest))
+        v1 = A.consistency_with_v1(o, pd.read_parquet(V1_OBSERVATIONS))
 
-    # 6. Claim verdicts: v1.3, with the superseded rule sets alongside
-    claims = C.claims_table(
-        v1_3=C.verdicts(design, label_sens, metrics, seeds, cfg),
-        v1_2=C.verdicts_v1_2(design, label_sens, metrics, seeds, cfg),
-        v1_1=C.verdicts_v1_1(design_v11, label_sens, metrics, seeds, cfg),
-        v1_0=C.verdicts_v1_0(comparison, mcnemar, funnel, metrics, seeds, cfg))
+    # 5. Claim verdicts
+    claims = C.verdicts(comparison, differences, label_sens, metrics, cfg)
 
-    return Results(metrics=metrics, design=design, comparison=comparison, claims=claims, mcnemar=mcnemar,
-                   funnel=funnel, oracle=oracle, by_source=by_source, redcode=redcode, label_sensitivity=label_sens,
-                   seeds=seeds, variants=variants, coverage=coverage, calibration=calibration, design_v11=design_v11)
+    return Results(metrics=metrics, comparison=comparison, differences=differences, claims=claims, funnel=funnel,
+                   oracle=oracle, label_sensitivity=label_sens, redcode=redcode, stability=stability,
+                   variants=variants, v1=v1, split_f1=A.f1_of_every_split(o, matrix), n_splits=len(splits))
 
 
-def load_label_audit():
-    """command_id -> audited label, from data/label_audit.yaml (sensitivity analysis only, D17)."""
-    import yaml
-    with open(os.path.join(HERE, "data", "label_audit.yaml"), encoding="utf-8") as f:
+def load_label_audit(cfg):
+    """command_id -> audited label, from data/label_audit.yaml (sensitivity analysis only)."""
+    with open(os.path.join(HERE, cfg["analysis"]["label_audit"]), encoding="utf-8") as f:
         return {i["command_id"]: i["audited_label"] for i in yaml.safe_load(f)["items"]}
 
 
-# ---------------------------------------------------------------- stage 5: export
+def older_art_snapshot(sources, manifest):
+    """The 2026-03-24 ART snapshot with static CARE's decision per command (construction variant V3)."""
+    art = pd.DataFrame(D.load_art(sources.older_art_root))
+    art = art[~art.command.isin(manifest["cross_source_conflicts_dropped"])].reset_index(drop=True)
+    return art.assign(deny=G.static_deny(art.command))
+
+
+# ---------------------------------------------------------------- stage 6: export
+TABLES = {   # file name -> attribute of Results
+    "metrics": "metrics", "comparison": "comparison", "paired_differences": "differences", "claims": "claims",
+    "resolution_funnel": "funnel", "oracle_bounds": "oracle", "label_sensitivity": "label_sensitivity",
+    "redcode_scenarios": "redcode", "run_stability": "stability", "construction_variants": "variants",
+    "consistency_with_v1": "v1",
+}
+
+
 def export(results, report_md, run):
     """Write every analysis table as Parquet plus `report.md`; return the Parquet paths."""
-    def save(df, name):
-        path = os.path.join(run.out, name)
-        df.to_parquet(path, index=False)
-        return path
-
-    r = results
-    paths = [os.path.join(run.out, "observations.parquet"),
-             save(r.metrics.assign(experiment="main"), "metrics.parquet"),
-             save(r.comparison, "comparison.parquet"),
-             save(r.claims, "claims.parquet"),
-             save(pd.concat([r.design.intervals, r.design_v11.intervals], ignore_index=True), "design_intervals.parquet"),
-             save(pd.concat([r.design.differences, r.design_v11.differences], ignore_index=True),
-                  "design_differences.parquet"),
-             save(r.label_sensitivity, "label_sensitivity.parquet"),
-             save(r.mcnemar, "mcnemar.parquet"),
-             save(r.funnel, "resolution_funnel.parquet"),
-             save(r.oracle, "oracle_bounds.parquet"),
-             save(r.by_source, "by_source.parquet"),
-             save(r.redcode, "redcode_scenarios.parquet")]
-    if r.seeds is not None:
-        paths += [save(r.seeds, "sensitivity_seeds.parquet"), save(r.variants, "sensitivity_variants.parquet"),
-                  save(r.calibration, "bootstrap_calibration.parquet"), save(r.coverage, "bootstrap_coverage.parquet")]
+    paths = [os.path.join(run.out, "observations.parquet")]
+    for name, attribute in TABLES.items():
+        table = getattr(results, attribute)
+        if table is not None:
+            paths.append(os.path.join(run.out, f"{name}.parquet"))
+            table.to_parquet(paths[-1], index=False)
     with open(os.path.join(run.out, "report.md"), "w") as f:
         f.write(report_md)
     return paths
 
 
-def write_provenance(run, cfg, integrity, tests, sources, manifest, llm_run, smoke, stage_seconds, paths):
+def write_provenance(run, cfg, integrity, tests, sources, manifest, splits, llm_run, checks, stage_seconds, paths):
     """Write `provenance.json` (everything needed to audit the run) and `validation.json` (pass/fail checks)."""
     rel = lambda p: os.path.relpath(p, HERE)  # noqa: E731
-    id_path = os.path.join(run.out if llm_run["executed_in_this_session"] else os.path.join(HERE, "results"),
-                           "llm_request_identity.json")
-    identity = json.load(open(id_path))
     sha = lambda p: SRC.sha256_file(os.path.join(HERE, p))  # noqa: E731
+    id_dir = run.out if llm_run["executed_in_this_session"] else os.path.join(HERE, "results")
+    identity = json.load(open(os.path.join(id_dir, "llm_request_identity.json")))
     provenance = dict(
         generated_utc=_utc_now(), mode=run.mode, run_label=run.label,
         protocol_version=cfg["protocol_version"], protocol_sha256=sha("PROTOCOL.md"),
         config_sha256=sha("config.yaml"), repo_head=integrity["repo_head"],
+        uncommitted_changes=integrity["uncommitted_changes"],
         method_under_test=dict(cfg["method_under_test"], care_identical_to_release=True),
         paper=cfg["paper"], sources=sources.records,
-        split=dict(manifest, sha256=sha("data/main_split.parquet")),
+        population=dict(manifest, sha256=sha(cfg["population"]["file"])),
+        paper_sized_splits=dict(n=len(splits), seeds=[splits.seeds[0], splits.seeds[-1]], composition=splits.composition,
+                                range_level=splits.level, sha256=hashlib.sha256(splits.matrix.tobytes()).hexdigest()),
         llm=dict(llm_run, requested_config=cfg["llm"], executed_request_identity=identity),
-        environment=integrity["environment"], unit_tests=tests, smoke_check=smoke,
+        environment=integrity["environment"], unit_tests=tests, preflight=checks,
         stage_seconds={k: round(v, 2) for k, v in stage_seconds.items()},
         outputs={rel(p): SRC.sha256_file(p) for p in paths},
     )
-    validation = dict(mode=run.mode, unit_tests=tests, smoke_check=smoke, static_deterministic=True,
-                      split_identical_to_committed=True,
+    validation = dict(mode=run.mode, unit_tests=tests, preflight=checks, static_deterministic=True,
+                      population_identical_to_committed=True,
                       sources_verified=all(s["verified"] for s in sources.records.values()),
                       llm_executed_in_this_session=llm_run["executed_in_this_session"],
                       llm_cached_rows=llm_run.get("cached_rows"),
@@ -480,7 +488,7 @@ def write_provenance(run, cfg, integrity, tests, sources, manifest, llm_run, smo
 
 
 def inventory():
-    """Every committed artifact file with its size and SHA-256 prefix."""
+    """Every file of the artifact with its size and SHA-256 prefix (the archive and the caches are left out)."""
     rows = []
     for root, _, files in os.walk(HERE):
         if any(s in root for s in SKIP_IN_INVENTORY):

@@ -1,17 +1,20 @@
-"""Reconstruct the CARE main evaluation split (paper Table I, Sec. IV-B).
+"""The evaluated population, and the paper's split recipe (paper Table I, Sec. IV-B).
 
-    source               class      n    recipe (decision IDs refer to DECISIONS.md)
-    ART (Atomic Red Team) DANGEROUS 137  linux sh/bash atomic tests, family = technique YAML
-    Canonical attacks     DANGEROUS  12  unreleased -> slots filled from ART (D2)
-    RedCode-Exec (bash)   DANGEROUS  71  stratified round-robin over risk scenarios (D3)
-    NL2Bash               SAFE      299  head-stratified (cap 12/head), family = lexical template (D5, D11)
-    Real-world commands   SAFE       30  unreleased -> data/manual/ (D4)
+Population: every unique command of the public corpora the paper draws from (PROTOCOL.md §4).
 
-Sampling draws whole families in seeded order, so siblings are drawn together
-or not at all (D11).  The flow is explicit and stateless:
+    source                class      what is loaded (decision IDs refer to DECISIONS.md)
+    ART (Atomic Red Team) DANGEROUS  every Linux sh/bash atomic test; family = technique YAML
+    RedCode-Exec (bash)   DANGEROUS  every bash script; family = risk scenario (D3)
+    NL2Bash               SAFE       every command; family = lexical template (D11).  Commands that
+                                     perform an operation the paper calls unconditionally dangerous
+                                     are evaluated but not counted as SAFE (D5): `in_primary` is False
+    Real-world            SAFE       the 30 developer commands in data/manual/ (D4)
 
-    pools = load_pools(roots, real_world_file)      # every candidate, per source
-    split, manifest = build_split(pools, seed, targets)
+Paper-sized splits: the paper evaluates 549 commands drawn from these corpora.  `SplitRecipe`
+re-draws a split of that composition from the population, once per seed:
+
+    population, manifest = load_population(roots, real_world_file)
+    draws = SplitRecipe(population, composition, head_cap).draw(seeds)   # row positions into `population`
 """
 from __future__ import annotations
 
@@ -21,10 +24,14 @@ import json
 import os
 import random
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 
+import numpy as np
 import pandas as pd
 import yaml
+
+SOURCES = ("ART", "RedCode-Exec", "NL2Bash", "Real-world")
+LABEL = {"ART": "DANGEROUS", "RedCode-Exec": "DANGEROUS", "NL2Bash": "SAFE", "Real-world": "SAFE"}
 
 # D5 -- NL2Bash label hygiene: operations the paper itself calls "unconditionally
 # dangerous" (Table I, adversarial-benign row), plus disk destruction and fork bombs.
@@ -40,10 +47,13 @@ UNSAFE_NL2BASH = [
     r":\(\)\s*\{",
 ]
 UNSAFE_NL2BASH_RE = re.compile("|".join(f"(?:{p})" for p in UNSAFE_NL2BASH))
-SOURCES = ("art", "redcode", "nl2bash", "real")
+
+# RedCode-Exec bash scenarios whose scripts contain a software weakness rather than a harmful
+# operation.  Our own reading of each scenario's task text; used in diagnostics only (D9).
+REDCODE_WEAKNESS_SCENARIOS = {12, 15, 16, 20, 22, 23, 25}
 
 
-# ---------------------------------------------------------------- helpers
+# ---------------------------------------------------------------- one record per command
 def strip_script(code):
     """Drop shebang, comment-only and blank lines."""
     return "\n".join(ln.rstrip() for ln in code.splitlines()
@@ -64,22 +74,23 @@ def nl2bash_template(cmd):
     return re.sub(r"\s+", " ", t).strip()
 
 
-def cmd_id(source, text):
+def command_id(source, text):
     return source[:3].lower() + "-" + hashlib.sha1(f"{source}\x00{text}".encode()).hexdigest()[:10]
 
 
-def rec(source, label, family, command, **meta):
-    return dict(command_id=cmd_id(source, command), source=source, label=label,
+def record(source, family, command, in_primary=True, **meta):
+    return dict(command_id=command_id(source, command), source=source, label=LABEL[source],
+                label_dangerous=LABEL[source] == "DANGEROUS", in_primary=in_primary,
                 family=family, head=head_of(command), command=command, meta=json.dumps(meta))
 
 
-# ---------------------------------------------------------------- sources
+# ---------------------------------------------------------------- corpora (records in corpus order)
 def load_art(root):
     recs, seen = [], set()
     for fp in sorted(glob.glob(os.path.join(root, "atomics", "T*", "T*.yaml"))):
         try:
             y = yaml.safe_load(open(fp, encoding="utf-8"))
-        except Exception:  # noqa: BLE001 -- malformed upstream YAML is skipped (counted below)
+        except Exception:  # noqa: BLE001 -- malformed upstream YAML is skipped
             continue
         tid = y.get("attack_technique")
         for t in y.get("atomic_tests", []) or []:
@@ -93,8 +104,8 @@ def load_art(root):
             if not cmd or cmd in seen:
                 continue
             seen.add(cmd)
-            recs.append(rec("ART", "DANGEROUS", tid, cmd, technique=tid,
-                            test_name=t.get("name"), guid=t.get("auto_generated_guid")))
+            recs.append(record("ART", tid, cmd, technique=tid, test_name=t.get("name"),
+                               guid=t.get("auto_generated_guid")))
     return recs
 
 
@@ -108,141 +119,166 @@ def load_redcode(root):
             if not cmd or cmd in seen:
                 continue
             seen.add(cmd)
-            recs.append(rec("RedCode-Exec", "DANGEROUS", f"RC-{scenario:02d}", cmd,
-                            scenario=scenario, index=item.get("Index")))
+            recs.append(record("RedCode-Exec", f"RC-{scenario:02d}", cmd, scenario=scenario, index=item.get("Index")))
     return recs
 
 
-def load_nl2bash(root, label_filter=True):
+def load_nl2bash(root):
     base = os.path.join(root, "data", "bash")
     cms = open(os.path.join(base, "all.cm"), encoding="utf-8").read().splitlines()
     nls = open(os.path.join(base, "all.nl"), encoding="utf-8").read().splitlines()
-    recs, seen, dropped = [], set(), 0
+    recs, seen = [], set()
     for i, (cm, nl) in enumerate(zip(cms, nls)):
         cm = cm.strip()
         if not cm or cm in seen:
             continue
         seen.add(cm)
-        if label_filter and UNSAFE_NL2BASH_RE.search(cm):
-            dropped += 1
-            continue
         tpl = nl2bash_template(cm)
         fam = "NB-" + hashlib.sha1(tpl.encode()).hexdigest()[:8]
-        recs.append(rec("NL2Bash", "SAFE", fam, cm, line=i + 1, nl=nl, template=tpl))
-    return recs, dropped
+        recs.append(record("NL2Bash", fam, cm, in_primary=not UNSAFE_NL2BASH_RE.search(cm),   # D5
+                           line=i + 1, nl=nl, template=tpl))
+    return recs
 
 
 def load_real_world(path):
     cmds = [ln.strip() for ln in open(path, encoding="utf-8")]
     cmds = [c for c in cmds if c and not c.startswith("#")]
-    return [rec("Real-world", "SAFE", f"R-{i + 1}", c) for i, c in enumerate(cmds)]
+    return [record("Real-world", f"R-{i + 1}", c) for i, c in enumerate(cmds)]
 
 
-# ---------------------------------------------------------------- sampling
-def family_draw(recs, target, rng, head_cap=None):
-    """Whole families in seeded random order until `target`; optional head cap.
-    The last family may be truncated; its remainder is never used."""
-    fams = defaultdict(list)
-    for r in recs:
-        fams[r["family"]].append(r)
-    order = sorted(fams)
+# ---------------------------------------------------------------- the population
+def load_population(roots, real_world_file):
+    """Every unique command of every corpus, in corpus order; returns (DataFrame, manifest).
+
+    A command string that occurs in two corpora has conflicting labels and is dropped from
+    both (D10).  `in_primary` is False for the NL2Bash commands that D5 does not count as SAFE.
+    """
+    recs = (load_art(roots["art"]) + load_redcode(roots["redcode"])
+            + load_nl2bash(roots["nl2bash"]) + load_real_world(real_world_file))
+    seen = Counter(r["command"] for r in recs)
+    conflicts = sorted(c for c, n in seen.items() if n > 1)
+    population = pd.DataFrame([r for r in recs if seen[r["command"]] == 1])
+    validate_population(population)
+    return population, dict(manifest(population), cross_source_conflicts_dropped=conflicts)
+
+
+def manifest(population):
+    p = population[population.in_primary]
+    return dict(n_evaluated=len(population), n_primary=len(p),
+                n_dangerous=int(p.label_dangerous.sum()), n_safe=int((~p.label_dangerous).sum()),
+                per_source={s: int((p.source == s).sum()) for s in SOURCES},
+                nl2bash_not_counted_as_safe=int((~population.in_primary).sum()))
+
+
+def validate_population(df):
+    """Integrity checks; raises AssertionError with a message on failure."""
+    assert df.command_id.is_unique, "duplicate command_id"
+    assert not df.command.duplicated().any(), "duplicate command text"
+    assert df.notna().all().all(), "missing values"
+    assert set(df.source) <= set(SOURCES), "unknown source"
+    assert (df.label == df.source.map(LABEL)).all(), "labels are corpus-level: one class per source"
+    assert df[~df.in_primary].source.eq("NL2Bash").all(), "only NL2Bash commands can be set aside (D5)"
+    leaked = df[df.in_primary & (df.source == "NL2Bash")].command.map(lambda c: bool(UNSAFE_NL2BASH_RE.search(c)))
+    assert not leaked.any(), "an unsafe NL2Bash command is counted as SAFE (D5)"
+    return True
+
+
+def composition(population):
+    """Per source: class, commands, template families, distinct heads, multi-line commands."""
+    name = np.where(population.in_primary, population.source, population.source + " (not counted as SAFE, D5)")
+    label = np.where(population.in_primary, population.label, "—")
+    table = population.assign(group=name, label=label).groupby(["group", "label"], sort=False).agg(
+        commands=("command_id", "size"), families=("family", "nunique"), heads=("head", "nunique"),
+        multiline=("command", lambda c: int(c.str.contains("\n").sum()))).reset_index()
+    return table.rename(columns={"group": "source", "label": "class"})
+
+
+def redcode_scenario(population):
+    """RedCode scenario number per row (NaN for other sources)."""
+    rc = population.source == "RedCode-Exec"
+    return population.family.where(rc).str[3:].astype(float)
+
+
+# ---------------------------------------------------------------- the paper's split recipe
+def family_draw(families, target, rng, head=None, head_cap=None):
+    """Whole families in seeded random order until `target` items are drawn.
+
+    `families` maps family -> its members in corpus order.  The last family may be truncated.
+    With `head_cap`, a member is skipped once its head (`head[member]`) has `head_cap` items.
+    """
+    order = sorted(families)
     rng.shuffle(order)
     out, heads = [], Counter()
     for f in order:
-        for r in fams[f]:
-            if head_cap and heads[r["head"]] >= head_cap:
+        for item in families[f]:
+            if head_cap and heads[head[item]] >= head_cap:
                 continue
-            out.append(r)
-            heads[r["head"]] += 1
+            out.append(item)
+            if head_cap:
+                heads[head[item]] += 1
             if len(out) == target:
                 return out
     return out
 
 
-def stratified_draw(recs, target, rng):
-    """Round-robin over strata in seeded order -> even coverage of strata."""
-    fams = defaultdict(list)
-    for r in recs:
-        fams[r["family"]].append(r)
-    for f in fams.values():
-        rng.shuffle(f)
-    order = sorted(fams)
+def stratified_draw(strata, target, rng):
+    """Round-robin over strata in seeded random order, so every stratum is covered evenly."""
+    strata = {s: list(members) for s, members in strata.items()}
+    for members in strata.values():
+        rng.shuffle(members)
+    order = sorted(strata)
     rng.shuffle(order)
     out, i = [], 0
-    while len(out) < target and any(fams.values()):
-        f = order[i % len(order)]
-        if fams[f]:
-            out.append(fams[f].pop())
+    while len(out) < target and any(strata.values()):
+        s = order[i % len(order)]
+        if strata[s]:
+            out.append(strata[s].pop())
         i += 1
     return out
 
 
-def load_pools(roots, real_world_file, label_filter=True):
-    """Every candidate command per source, after label hygiene (D5) and conflict removal (D10).
+class SplitRecipe:
+    """Draws splits with the paper's Table I composition from the population.
 
-    Returns a dict: `art`, `redcode`, `nl2bash`, `real` (lists of records in corpus order),
-    plus `nl2bash_dropped`, `conflicts` and `label_filter` for the manifest.
+        ART           whole technique families, in random order, until the quota is reached
+        RedCode-Exec  round-robin over the risk scenarios, random commands within each
+        NL2Bash       whole template families until the quota, at most `head_cap` commands per head
+        Real-world    the first `quota` commands (a fixed set)
+
+    Each source has its own random stream, seeded by (seed, source).  Only `eligible` rows can be
+    drawn (default: the primary population).  `draw(seeds)` returns one split per seed, as row
+    positions into `population`.
     """
-    nl2bash, dropped = load_nl2bash(roots["nl2bash"], label_filter)
-    pools = dict(art=load_art(roots["art"]), redcode=load_redcode(roots["redcode"]),
-                 nl2bash=nl2bash, real=load_real_world(real_world_file))
-    # D10 -- a string present in two sources has conflicting labels; drop it everywhere.
-    seen = Counter(r["command"] for k in SOURCES for r in pools[k])
-    conflicts = sorted(c for c, n in seen.items() if n > 1)
-    for k in SOURCES:
-        pools[k] = [r for r in pools[k] if r["command"] not in set(conflicts)]
-    return dict(pools, nl2bash_dropped=dropped, conflicts=conflicts, label_filter=label_filter)
+
+    def __init__(self, population, composition, head_cap, eligible=None):
+        eligible = population.in_primary.to_numpy() if eligible is None else np.asarray(eligible, bool)
+        source, family = population.source.to_numpy(), population.family.to_numpy()
+        self.composition, self.head_cap = composition, head_cap
+        self.head = population["head"].to_numpy()
+        self.families = {s: {} for s in SOURCES}     # source -> {family: [row positions, in corpus order]}
+        for pos in np.flatnonzero(eligible).tolist():
+            self.families[source[pos]].setdefault(family[pos], []).append(pos)
+        for s in SOURCES:
+            available = sum(map(len, self.families[s].values()))
+            assert available >= composition.get(s, 0), f"{s}: {available} commands, fewer than its quota"
+
+    def draw_source(self, source, seed):
+        quota, families = self.composition.get(source, 0), self.families[source]
+        rng = random.Random(f"{seed}:{source}")
+        if source == "ART":
+            return family_draw(families, quota, rng)
+        if source == "RedCode-Exec":
+            return stratified_draw(families, quota, rng)
+        if source == "NL2Bash":
+            return family_draw(families, quota, rng, head=self.head, head_cap=self.head_cap)
+        return [pos for members in families.values() for pos in members][:quota]
+
+    def draw(self, seeds, sources=SOURCES):
+        """One split per seed: {source: (n_seeds, quota) array of row positions into the population}."""
+        return {s: np.array([self.draw_source(s, seed) for seed in seeds], dtype=np.int64).reshape(len(seeds), -1)
+                for s in sources}
 
 
-def build_split(pools, seed, targets, head_cap=12):
-    """Draw the split from the candidate pools; return (DataFrame, manifest dict)."""
-    p = pools
-    rng = lambda src: random.Random(f"{seed}:{src}")  # independent stream per source  # noqa: E731
-    parts = (family_draw(p["art"], targets["ART"], rng("ART"))
-             + stratified_draw(p["redcode"], targets["RedCode-Exec"], rng("RedCode-Exec"))
-             + family_draw(p["nl2bash"], targets["NL2Bash"], rng("NL2Bash"), head_cap=head_cap)
-             + p["real"][: targets["Real-world"]])
-    df = pd.DataFrame(parts)
-    df["label_dangerous"] = df["label"].eq("DANGEROUS")
-    df = df.sort_values(["source", "command_id"], kind="stable").reset_index(drop=True)
-    by = lambda s: df[df.source == s]  # noqa: E731
-    manifest = dict(
-        seed=seed, label_filter=p["label_filter"], n=len(df),
-        n_dangerous=int(df.label_dangerous.sum()), n_safe=int((~df.label_dangerous).sum()),
-        per_source={k: int(v) for k, v in df.source.value_counts().items()},
-        candidate_pool=dict(ART=len(p["art"]), RedCode_Exec=len(p["redcode"]), NL2Bash=len(p["nl2bash"]),
-                            NL2Bash_label_filtered_out=p["nl2bash_dropped"], Real_world=len(p["real"]),
-                            cross_source_conflicts_dropped=p["conflicts"]),
-        families_drawn=dict(ART=int(by("ART").family.nunique()),
-                            RedCode_Exec=int(by("RedCode-Exec").family.nunique()),
-                            NL2Bash=int(by("NL2Bash").family.nunique()),
-                            NL2Bash_heads=int(by("NL2Bash")["head"].nunique())),
-    )
-    return df, manifest
-
-
-def validate_split(df, targets):
-    """Integrity checks; raises AssertionError with a message on failure."""
-    assert df.command_id.is_unique, "duplicate command_id"
-    assert not df.command.duplicated().any(), "duplicate command text"
-    assert df.notna().all().all(), "missing values"
-    counts = df.source.value_counts().to_dict()
-    assert counts == targets, f"per-source counts {counts} != {targets}"
-    lab = df.groupby("source").label.unique().map(list).to_dict()
-    assert lab == {"ART": ["DANGEROUS"], "RedCode-Exec": ["DANGEROUS"],
-                   "NL2Bash": ["SAFE"], "Real-world": ["SAFE"]}, f"labels by source {lab}"
-    assert not df[df.source == "NL2Bash"].command.map(lambda c: bool(UNSAFE_NL2BASH_RE.search(c))).any(), "D5 filter leak"
-    return True
-
-
-def composition(df):
-    """Per source and label: commands, template families, NL2Bash heads, multi-line commands."""
-    return df.groupby(["source", "label"]).agg(
-        n=("command_id", "size"), families=("family", "nunique"), heads=("head", "nunique"),
-        multiline=("command", lambda c: int(c.str.contains("\n").sum()))).reset_index()
-
-
-def corpus_order(df, pools):
-    """Each command's position in its source pool: the member order `family_draw` truncates in."""
-    pos = {r["command_id"]: i for k in SOURCES for i, r in enumerate(pools[k])}
-    return df.command_id.map(pos).to_numpy()
+def as_matrix(draws):
+    """Join per-source draws into one (n_splits, split_size) matrix of row positions."""
+    return np.hstack([draws[s] for s in SOURCES if s in draws])
