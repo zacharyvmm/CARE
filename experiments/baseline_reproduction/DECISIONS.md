@@ -670,3 +670,9 @@ known and before any v2 result existed.
 * **Not covered by the clean clone:** smoke mode and the live LLM path (the live run is L14).
 * **Record:** `results/executed/clean_clone_validation.json`. This closes the first open item
   of L15; an external review of protocol v2.0 is still open.
+
+### L17: Correction to L16
+* L16 and the message of commit `299d2bd` say "13 Parquet tables". The correct count is **12**
+  Parquet tables (including `observations.parquet`), plus `report.md` and both figures: 15
+  files, all byte-identical in the clean clone. The record
+  `results/executed/clean_clone_validation.json` lists them and was correct.

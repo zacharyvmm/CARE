@@ -1,11 +1,11 @@
 {
-  "generated_utc": "2026-11-11T19:40:26.879086+00:00",
+  "generated_utc": "2026-11-11T19:44:03.101624+00:00",
   "mode": "full",
   "run_label": "confirmatory-v2",
   "protocol_version": "2.0",
   "protocol_sha256": "c4dde019fba4402a99b23b65203c2dc83f52ae3f2cfe1e978a548cbc85a04844",
   "config_sha256": "25bc802f786a99f04d6d67e21b1bb71afdf8ad6ab9bb00810a8ac13a55de083f",
-  "repo_head": "931ebfeaacaf52361034a25b1343bf2c7e659932",
+  "repo_head": "299d2bdae1b836550a724ffa9c77882431b95ae9",
   "uncommitted_changes": true,
   "method_under_test": {
     "repository": "https://github.com/prisma-research/CARE (this repo, fork zacharyvmm/CARE)",
@@ -182,10 +182,10 @@
   "stage_seconds": {
     "unit_tests_s": 1.69,
     "sources_s": 0.04,
-    "static_s": 22.19,
+    "static_s": 21.89,
     "llm_s": 0.2,
-    "splits_s": 36.17,
-    "analysis_s": 41.76
+    "splits_s": 36.11,
+    "analysis_s": 41.21
   },
   "outputs": {
     "results/observations.parquet": "3f498e61061a2f71044db8c43953a94e3560ba8208ea5365e5bc505319a292a6",
