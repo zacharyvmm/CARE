@@ -12,7 +12,7 @@ are covered.
 
 | | |
 |---|---|
-| **Start here** | [`baseline_reproduction.ipynb`](baseline_reproduction.ipynb): the executed notebook, one pipeline stage per section |
+| **Start here** | [`baseline_reproduction.ipynb`](baseline_reproduction.ipynb): the executed notebook. It is the whole pipeline: each step is one call, each table is computed by the cell that shows it |
 | **Protocol** | [`PROTOCOL.md`](PROTOCOL.md) v2.1. v2.0 was frozen before the run; v2.1 only reports the spread as σ |
 | **Decisions** | [`DECISIONS.md`](DECISIONS.md), append-only |
 | **All tables** | [`results/report.md`](results/report.md) |
@@ -157,9 +157,12 @@ jupyter nbconvert --to notebook --execute --inplace baseline_reproduction.ipynb
 3. Report DR and FPR on the full corpora, and F1 on the same paper-sized splits:
 
    ```python
-   recipe = dataset.SplitRecipe(population, cfg["paper_sized_splits"]["composition"], head_cap=12)
-   splits = dataset.as_matrix(recipe.draw(range(10_000)))        # row positions into `population`
-   rates  = stats.rates(stats.split_counts(y, your_deny_decisions, splits))
+   from repro import stats
+   from repro.paper_sized_splits import SplitRecipe, Splits
+
+   recipe = SplitRecipe(population, configuration["paper_sized_splits"]["composition"], head_cap=12)
+   splits = Splits(range(10_000), recipe.draw(range(10_000)))
+   rates  = stats.rates(stats.split_counts(population.label_dangerous, your_deny_decisions, splits.rows))
    ```
 
 Details are in `PROTOCOL.md` §12.
@@ -199,7 +202,7 @@ Details are in `PROTOCOL.md` §12.
 |---|---|
 | `baseline_reproduction.ipynb` | the executable narrative, executed against the committed observations |
 | `PROTOCOL.md`, `DECISIONS.md`, `config.yaml` | protocol v2.1, the append-only decision log, the configuration (pins, fingerprints, reported values) |
-| `repro/` | `pipeline` (one function per notebook stage; start here), `sources` (pinned fetch), `dataset` (population, split recipe), `guards` (CARE, baselines, LLM client and cache), `stats` (formulas), `analysis` (tables), `claims` (verdicts), `report` (figures, views) |
+| `repro/` | the code the notebook calls, one module per step: `configuration`, `sources` (pinned fetch), `corpora` (the population), `guards` (CARE, baselines, LLM client), `evaluation` (run the guards, or reuse verified replies), `paper_sized_splits` (the split recipe), `stats` (formulas), `analysis` (`Analysis`: every table), `claims` (verdict rules), `report` (`Report`: tables and figures), `provenance` (`RunRecord`: checks and exported files) |
 | `tests/test_repro.py` | 62 unit tests; the notebook also runs CARE's own 10 |
 | `data/population.parquet` | the 11,665 evaluated commands (licenses in `data/NOTICE.md`) |
 | `data/label_audit.yaml` | the audited labels of the 23 commands behind C7 and C9 (sensitivity analysis only) |

@@ -1,19 +1,12 @@
 {
   "mode": "full",
-  "unit_tests": {
-    "returncode": 0,
-    "summary": "72 passed in 1.31s"
-  },
-  "preflight": {
-    "static_rows": 48
-  },
-  "static_deterministic": true,
-  "population_identical_to_committed": true,
+  "unit_tests": "72 passed in 1.35s",
+  "care_identical_to_release": true,
   "sources_verified": true,
-  "llm_executed_in_this_session": false,
-  "llm_cached_rows": 0,
-  "llm_replies_within_live_window": true,
-  "llm_request_identity_verified": true,
+  "population_identical_to_committed": true,
+  "static_guards_deterministic": true,
+  "llm_queried_in_this_session": false,
+  "llm_replies_verified_before_reuse": true,
   "llm_errors": 0,
-  "completed_utc": "2026-11-11T20:02:14.140895+00:00"
+  "completed_utc": "2026-11-11T20:35:39.427757+00:00"
 }

@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import pandas as pd
 
-from . import stats as S
-from .analysis import CARE_VARIANTS, COMPARATORS, CORPORA, FULL, SPLITS, STATIC
+from . import stats
+from .corpora import FULL_CORPORA
+from .guards import CARE_VARIANTS, COMPARATORS, FULL_CARE, STATIC_CARE
+from .paper_sized_splits import PAPER_SIZED_SPLITS
 
 SUPPORTED, INCONCLUSIVE = "supported", "inconclusive"
 NOT_SUPPORTED = "not supported (on this reconstruction)"
@@ -36,104 +38,127 @@ CLAIMS = {   # id: (claim, where the paper makes it)
     "C10": ("CARE attains the highest F1 among the evaluated guards", "Table II"),
     "C11": ("Mean latency 0.34 ms (CARE w/o Resolution) and 2.32 ms (CARE)", "Table II"),
 }
-TABLE_II_ROWS = {"C1": STATIC, "C2": FULL, "C3": "PromptOnly", "C4": "LLMJudge", "C5": "NeMo self-check"}
+TABLE_II_GUARD = {"C1": STATIC_CARE, "C2": FULL_CARE, "C3": "PromptOnly", "C4": "LLMJudge", "C5": "NeMo self-check"}
 
 
-def verdicts(comparison, differences, label_sens, metrics, cfg):
+def verdicts(comparison, paired_differences, label_sensitivity, metrics, configuration):
     """One row per claim: outcome and rationale."""
-    v = {cid: table_ii_f1(cond, comparison) for cid, cond in TABLE_II_ROWS.items()}
-    v["C6"] = beats_llm_judges(differences)
-    v["C7"] = resolution_lowers_fpr(label_sens)
-    v["C8"] = escalation_rate_matches(metrics, cfg)
-    v["C9"] = judge_never_allows_dangerous(label_sens)
-    v["C10"] = highest_f1(differences)
-    v["C11"] = latency(comparison)
-    return pd.DataFrame([dict(claim_id=cid, claim=claim, paper_source=source, outcome=v[cid][0], rationale=v[cid][1])
-                         for cid, (claim, source) in CLAIMS.items()])
+    verdict = {claim: table_ii_f1(guard, comparison) for claim, guard in TABLE_II_GUARD.items()}
+    verdict["C6"] = beats_llm_judges(paired_differences)
+    verdict["C7"] = resolution_lowers_fpr(label_sensitivity)
+    verdict["C8"] = escalation_rate_matches(metrics, configuration)
+    verdict["C9"] = judge_never_allows_dangerous(label_sensitivity)
+    verdict["C10"] = highest_f1(paired_differences)
+    verdict["C11"] = latency(comparison)
+    rows = []
+    for claim, (statement, where) in CLAIMS.items():
+        outcome, rationale = verdict[claim]
+        rows.append(dict(claim_id=claim, claim=statement, paper_source=where, outcome=outcome, rationale=rationale))
+    return pd.DataFrame(rows)
 
 
-def table_ii_f1(condition, comparison):
+def table_ii_f1(guard, comparison):
     """C1-C5: is the reported F1 more than 1.96 sigma from the mean of the paper-sized splits?"""
-    x = comparison.set_index(["condition", "metric"]).loc[(condition, "F1")]
-    why = (f"reported F1 {x.reported:.2f}; paper-sized splits: mean {x.observed:.2f}, σ = {x.sigma:.2f}, so the "
-           f"reported value is {S.in_sigmas(x.sigmas_from_mean)} from the mean; best split {x.split_max:.2f}; "
-           f"full corpora {x.full_corpora:.2f}")
-    return (NOT_CONTRADICTED if x.within_threshold else NOT_SUPPORTED), why
+    f1 = comparison.set_index(["condition", "metric"]).loc[(guard, "F1")]
+    rationale = (
+        f"reported F1 {f1.reported:.2f}; paper-sized splits: mean {f1.observed:.2f}, σ = {f1.sigma:.2f}, so the "
+        f"reported value is {stats.in_sigmas(f1.sigmas_from_mean)} from the mean; best split {f1.split_max:.2f}; "
+        f"full corpora {f1.full_corpora:.2f}")
+    return (NOT_CONTRADICTED if f1.within_threshold else NOT_SUPPORTED), rationale
 
 
-def beats_llm_judges(differences):
+def beats_llm_judges(paired_differences):
     """C6: does CARE (w/o Resolution) beat PromptOnly and LLMJudge in accuracy on the paper-sized splits?"""
-    d = differences.set_index(["left", "right", "metric"])
-    per_pair, parts = [], []
-    for other in ("PromptOnly", "LLMJudge"):
-        x = d.loc[(STATIC, other, "delta_accuracy")]
-        per_pair.append(SUPPORTED if x.sigmas_from_zero > x.threshold else
-                        NOT_SUPPORTED if x.sigmas_from_zero < -x.threshold else INCONCLUSIVE)
-        parts.append(f"vs {other}: accuracy {x.value:+.2f} pp, σ = {x.sigma:.2f} ({S.in_sigmas(x.sigmas_from_zero)} from 0; "
-                     f"paper {x.paper_delta:+.2f} pp); "
-                     f"the paper's McNemar test favours CARE in {100 * x.mcnemar_favours_left:.0f}% of splits "
-                     f"and {other} in {100 * x.mcnemar_favours_right:.0f}%")
-    outcome = (SUPPORTED if all(v == SUPPORTED for v in per_pair) else
-               NOT_SUPPORTED if NOT_SUPPORTED in per_pair else INCONCLUSIVE)
-    return outcome, "; ".join(parts)
+    differences = paired_differences.set_index(["left", "right", "metric"])
+    outcomes, evidence = [], []
+    for judge in ("PromptOnly", "LLMJudge"):
+        accuracy = differences.loc[(STATIC_CARE, judge, "delta_accuracy")]
+        if accuracy.sigmas_from_zero > accuracy.threshold:
+            outcomes.append(SUPPORTED)
+        elif accuracy.sigmas_from_zero < -accuracy.threshold:
+            outcomes.append(NOT_SUPPORTED)
+        else:
+            outcomes.append(INCONCLUSIVE)
+        evidence.append(
+            f"vs {judge}: accuracy {accuracy.value:+.2f} pp, σ = {accuracy.sigma:.2f} "
+            f"({stats.in_sigmas(accuracy.sigmas_from_zero)} from 0; paper {accuracy.paper_delta:+.2f} pp); "
+            f"the paper's McNemar test favours CARE in {100 * accuracy.mcnemar_favours_left:.0f}% of splits "
+            f"and {judge} in {100 * accuracy.mcnemar_favours_right:.0f}%")
+    if all(outcome == SUPPORTED for outcome in outcomes):
+        return SUPPORTED, "; ".join(evidence)
+    return (NOT_SUPPORTED if NOT_SUPPORTED in outcomes else INCONCLUSIVE), "; ".join(evidence)
 
 
-def resolution_lowers_fpr(label_sens):
+def resolution_lowers_fpr(label_sensitivity):
     """C7: does Resolution lower FPR at unchanged DR on the full corpora, under both label sets?"""
-    ls = label_sens.set_index(["labels", "condition"])
-    per_labels, parts = [], []
-    for labels in label_sens["labels"].unique():
-        dfpr = ls.loc[(labels, FULL)].fpr - ls.loc[(labels, STATIC)].fpr
-        ddr = ls.loc[(labels, FULL)].dr - ls.loc[(labels, STATIC)].dr
-        per_labels.append(SUPPORTED if dfpr < 0 and abs(ddr) < 1e-9 else NOT_SUPPORTED)
-        parts.append(f"{labels}: FPR {dfpr:+.2f} pp, DR {ddr:+.2f} pp")
-    return (per_labels[0] if len(set(per_labels)) == 1 else LABEL_SENSITIVE), "full corpora, primary run; " + "; ".join(parts)
+    rates = label_sensitivity.set_index(["labels", "condition"])
+    outcomes, evidence = [], []
+    for labels in label_sensitivity["labels"].unique():
+        fpr_change = rates.loc[(labels, FULL_CARE)].fpr - rates.loc[(labels, STATIC_CARE)].fpr
+        dr_change = rates.loc[(labels, FULL_CARE)].dr - rates.loc[(labels, STATIC_CARE)].dr
+        outcomes.append(SUPPORTED if fpr_change < 0 and abs(dr_change) < 1e-9 else NOT_SUPPORTED)
+        evidence.append(f"{labels}: FPR {fpr_change:+.2f} pp, DR {dr_change:+.2f} pp")
+    return _unless_label_sensitive(outcomes), "full corpora, primary run; " + "; ".join(evidence)
 
 
-def escalation_rate_matches(metrics, cfg):
+def escalation_rate_matches(metrics, configuration):
     """C8: is the reported escalation rate more than 1.96 sigma from the mean of the paper-sized splits?"""
-    p = cfg["reported"]["resolution_funnel"]
-    reported = 100 * p["escalated"] / p["n"]
-    m = metrics[(metrics.condition == FULL) & (metrics.run == cfg["analysis"]["primary_run"])
-                & (metrics.metric == "llm_call_rate")].set_index("scope")
-    x = m.loc[SPLITS]
-    distance = S.sigmas_between(reported, x.value, x.sd)
-    why = (f"reported {reported:.2f}%; paper-sized splits: mean {x.value:.2f}%, σ = {x.sd:.2f} "
-           f"({S.in_sigmas(distance)} from the mean); full corpora {m.loc[CORPORA].value:.2f}%")
-    within = abs(distance) <= S.sigma_threshold(cfg["paper_sized_splits"]["level"])
-    return (NOT_CONTRADICTED if within else NOT_SUPPORTED), why
+    paper = configuration["reported"]["resolution_funnel"]
+    reported = 100 * paper["escalated"] / paper["n"]
+    primary_run = configuration["analysis"]["primary_run"]
+    call_rate = metrics[(metrics.condition == FULL_CARE) & (metrics.run == primary_run)
+                        & (metrics.metric == "llm_call_rate")].set_index("scope")
+    over_splits = call_rate.loc[PAPER_SIZED_SPLITS]
+    distance = stats.sigmas_between(reported, over_splits.value, over_splits.sd)
+    rationale = (
+        f"reported {reported:.2f}%; paper-sized splits: mean {over_splits.value:.2f}%, σ = {over_splits.sd:.2f} "
+        f"({stats.in_sigmas(distance)} from the mean); full corpora {call_rate.loc[FULL_CORPORA].value:.2f}%")
+    within = abs(distance) <= stats.sigma_threshold(configuration["paper_sized_splits"]["level"])
+    return (NOT_CONTRADICTED if within else NOT_SUPPORTED), rationale
 
 
-def judge_never_allows_dangerous(label_sens):
+def judge_never_allows_dangerous(label_sensitivity):
     """C9: does the judge ever turn a DANGEROUS command into ALLOW, under both label sets?"""
-    judged = label_sens.dropna(subset=["judge_allow_dangerous_per_run"]).set_index("labels")
-    per_labels = [SUPPORTED if total == 0 else NOT_SUPPORTED for total in judged.judge_allow_dangerous_total]
-    why = "; ".join(f"{labels}: DANGEROUS commands the judge allowed, per run {r.judge_allow_dangerous_per_run}"
-                    for labels, r in judged.iterrows())
+    judged = label_sensitivity.dropna(subset=["judge_allow_dangerous_per_run"]).set_index("labels")
+    outcomes = [SUPPORTED if total == 0 else NOT_SUPPORTED for total in judged.judge_allow_dangerous_total]
+    evidence = "; ".join(
+        f"{labels}: DANGEROUS commands the judge allowed, per run {row.judge_allow_dangerous_per_run}"
+        for labels, row in judged.iterrows())
     first = judged.iloc[0]
-    why += f" ({int(first.commands_audited)} of {int(first.commands_in_question)} such commands audited)"
-    return (per_labels[0] if len(set(per_labels)) == 1 else LABEL_SENSITIVE), "full corpora, all runs; " + why
+    evidence += f" ({int(first.commands_audited)} of {int(first.commands_in_question)} such commands audited)"
+    return _unless_label_sensitive(outcomes), "full corpora, all runs; " + evidence
 
 
-def highest_f1(differences):
+def highest_f1(paired_differences):
     """C10: does a CARE variant beat every comparator in F1, or is every variant beaten by one?
 
     Uses the threshold that holds for the three comparators at once (2.39 sigma, Bonferroni),
     because the strongest comparator is only known after the results.
     """
-    d = differences[(differences.metric == "delta_F1") & differences.right.isin(COMPARATORS)]
-    by_variant = {c: d[d.left == c] for c in CARE_VARIANTS if (d.left == c).any()}
-    wins = any((g.sigmas_from_zero > g.threshold_simultaneous).all() for g in by_variant.values())
-    beaten = bool(by_variant) and all((g.sigmas_from_zero < -g.threshold_simultaneous).any() for g in by_variant.values())
-    closest = d.loc[d.groupby("left").value.idxmin()]
-    why = "; ".join(f"{r.left} - {r.right}: F1 {r.value:+.2f} pp, σ = {r.sigma:.2f} ({S.in_sigmas(r.sigmas_from_zero)} from 0)"
-                    for r in closest.itertuples())
-    return (SUPPORTED if wins else NOT_SUPPORTED if beaten else INCONCLUSIVE,
-            why + f"; separated only beyond {closest.threshold_simultaneous.iloc[0]:.2f}σ; coverage: 6 of the paper's 12 rows")
+    f1 = paired_differences[(paired_differences.metric == "delta_F1") & paired_differences.right.isin(COMPARATORS)]
+    by_variant = [f1[f1.left == variant] for variant in CARE_VARIANTS if (f1.left == variant).any()]
+    some_variant_wins = any((rows.sigmas_from_zero > rows.threshold_simultaneous).all() for rows in by_variant)
+    every_variant_beaten = bool(by_variant) and all(
+        (rows.sigmas_from_zero < -rows.threshold_simultaneous).any() for rows in by_variant)
+    strongest_comparator = f1.loc[f1.groupby("left").value.idxmin()]
+    evidence = "; ".join(
+        f"{row.left} - {row.right}: F1 {row.value:+.2f} pp, σ = {row.sigma:.2f} "
+        f"({stats.in_sigmas(row.sigmas_from_zero)} from 0)"
+        for row in strongest_comparator.itertuples())
+    evidence += (f"; separated only beyond {strongest_comparator.threshold_simultaneous.iloc[0]:.2f}σ; "
+                 "coverage: 6 of the paper's 12 rows")
+    outcome = SUPPORTED if some_variant_wins else NOT_SUPPORTED if every_variant_beaten else INCONCLUSIVE
+    return outcome, evidence
 
 
 def latency(comparison):
     """C11: never judged; hardware and serving differ."""
-    x = comparison[comparison.metric == "latency_mean"].set_index("condition").observed
-    return INCONCLUSIVE, (f"observed mean {x[STATIC]:.2f} ms (static) and {x[FULL]:.2f} ms (with Resolution) on a laptop "
-                          "CPU with a hosted API; the paper used 4xH100 with local vLLM, so the values are not comparable")
+    observed = comparison[comparison.metric == "latency_mean"].set_index("condition").observed
+    return INCONCLUSIVE, (
+        f"observed mean {observed[STATIC_CARE]:.2f} ms (static) and {observed[FULL_CARE]:.2f} ms (with Resolution) "
+        "on a laptop CPU with a hosted API; the paper used 4xH100 with local vLLM, so the values are not comparable")
+
+
+def _unless_label_sensitive(outcomes):
+    """The outcome both label sets agree on, or *inconclusive (label-sensitive)*."""
+    return outcomes[0] if len(set(outcomes)) == 1 else LABEL_SENSITIVE

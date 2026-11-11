@@ -69,7 +69,7 @@ analysis:
 
 smoke:   # REPRO_MODE=smoke: a tiny end-to-end check, never a reproduction
   commands_per_group: 8
-  composition: {ART: 5, RedCode-Exec: 5, NL2Bash: 5, Real-world: 5}
+  composition: {ART: 3, RedCode-Exec: 3, NL2Bash: 3, Real-world: 3}
   seeds: [0, 199]
 
 reported:   # values printed in the paper (percent / ms)

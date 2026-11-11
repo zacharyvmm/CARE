@@ -2,9 +2,10 @@
 
 > Every comparison with the paper is **not directly comparable**: the population is rebuilt from the public corpora (the authors' 549 commands are unreleased) and labels are corpus-level (paper Table I).
 
+
 ## Claim verdicts
 
-| claim_id | claim | outcome | rationale |
+| id | claim | verdict | evidence |
 |---|---|---|---|
 | C1 | Table II row 'CARE (w/o Resolution)': F1 84.99 | not supported (on this reconstruction) | reported F1 84.99; paper-sized splits: mean 60.15, σ = 4.25, so the reported value is +5.8σ from the mean; best split 75.27; full corpora 49.46 |
 | C2 | Table II row 'CARE': F1 85.64 | not supported (on this reconstruction) | reported F1 85.64; paper-sized splits: mean 59.21, σ = 4.30, so the reported value is +6.2σ from the mean; best split 74.46; full corpora 48.59 |
@@ -22,7 +23,7 @@
 
 σ is the standard deviation over the splits. ∈ / ∉: the reported value is within / beyond 1.96σ of the mean.
 
-| condition | F1 | DR | FPR |
+| guard | F1 | DR | FPR |
 |---|---|---|---|
 | PromptOnly | 66.99 → **61.06** (σ = 3.17) ∈ | 63.18 → **55.08** (σ = 3.89) ∉ | 17.02 → **16.86** (σ = 2.13) ∈ |
 | LLMJudge | 73.09 → **66.15** (σ = 3.07) ∉ | 67.27 → **58.69** (σ = 3.81) ∉ | 11.25 → **12.46** (σ = 1.88) ∈ |
@@ -32,7 +33,7 @@
 
 ## Full corpora: every guard on every command (primary run)
 
-| condition | DR, all DANGEROUS | DR, ART | DR, RedCode-Exec | FPR, all SAFE | FPR, NL2Bash | FPR, Real-world | F1 | denied, NL2Bash set aside (D5) |
+| guard | DR, all DANGEROUS | DR, ART | DR, RedCode-Exec | FPR, all SAFE | FPR, NL2Bash | FPR, Real-world | F1 | denied, NL2Bash set aside (D5) |
 |---|---|---|---|---|---|---|---|---|
 | PromptOnly | 52.1 (528/1,013) | 58.6 (243/415) | 47.7 (285/598) | 27.2 (2,822/10,368) | 27.3 (2,822/10,338) | 0.0 (0/30) | 24.20 | 47.9 (136/284) |
 | LLMJudge | 52.4 (531/1,013) | 66.3 (275/415) | 42.8 (256/598) | 18.5 (1,918/10,368) | 18.6 (1,918/10,338) | 0.0 (0/30) | 30.68 | 56.7 (161/284) |
@@ -61,7 +62,7 @@ Two guards count as separated when the mean difference is more than 1.96σ from 
 | CARE − CARE (w/o Resolution) | F1 | -0.94 (σ = 0.72) | -1.3σ | 8.9% of splits | -0.86 |
 | CARE − CARE (w/o Resolution) | accuracy | -0.18 (σ = 0.40) | -0.4σ | 24.4% of splits | +0.14 |
 
-The paper's McNemar test (two-sided, Yates, α = 0.05) on every split:
+## The paper's McNemar test (two-sided, Yates, α = 0.05) on every split
 
 | pair | left only / right only correct (mean per split) | paper (Table VIII) | p < 0.05 favouring left | p < 0.05 favouring right |
 |---|---|---|---|---|
@@ -95,12 +96,23 @@ The paper's McNemar test (two-sided, Yates, α = 0.05) on every split:
 
 ## Label sensitivity of the Resolution claims (C7, C9; full corpora)
 
-| labels | condition | DR | FPR | DANGEROUS commands the judge allowed, per run |
+| labels | guard | DR | FPR | DANGEROUS commands the judge allowed, per run |
 |---|---|---|---|---|
 | corpus-level labels (paper Table I) | CARE (w/o Resolution) | 44.82 | 3.56 | — |
 | corpus-level labels (paper Table I) | CARE | 42.55 | 3.18 | [23, 23, 22] |
 | audited labels for the judge-allowed commands | CARE (w/o Resolution) | 43.54 | 3.77 | — |
 | audited labels for the judge-allowed commands | CARE | 43.54 | 3.18 | [0, 0, 0] |
+
+## DANGEROUS-labelled commands the judge allowed, per family
+
+| source | family | audited label | commands |
+|---|---|---|---|
+| ART | T1140 | SAFE | 2 |
+| RedCode-Exec | RC-12 | SAFE | 12 |
+| RedCode-Exec | RC-16 | SAFE | 5 |
+| RedCode-Exec | RC-20 | SAFE | 1 |
+| RedCode-Exec | RC-22 | SAFE | 1 |
+| RedCode-Exec | RC-25 | SAFE | 2 |
 
 ## RedCode-Exec: commands denied per risk scenario (of n; primary run)
 
@@ -137,9 +149,9 @@ The paper's McNemar test (two-sided, Yates, α = 0.05) on every split:
 | V2b | RedCode: not drawn | 59.76 | 68.35 | 67.38 | 60.71 | 60.84 |
 | V3 | ART snapshot of 2026-03-24 (365 commands, now 415) | — | — | — | 61.89 | — |
 
-## Run-to-run stability of the LLM conditions
+## Run-to-run stability of the LLM guards
 
-| condition | runs | decisions that differ between runs (%) | F1, run 1 | F1, run 2 | F1, run 3 |
+| guard | runs | decisions that differ between runs (%) | F1, run 1 | F1, run 2 | F1, run 3 |
 |---|---|---|---|---|---|
 | PromptOnly | 3 | 3.32 | 61.06 | 61.15 | 61.61 |
 | LLMJudge | 3 | 1.78 | 66.15 | 66.32 | 66.39 |
@@ -148,7 +160,7 @@ The paper's McNemar test (two-sided, Yates, α = 0.05) on every split:
 
 ## Consistency with the archived v1 run (the 549 commands v1 evaluated)
 
-| condition | commands | same decision as v1 (%) | F1 in v1 | F1 now |
+| guard | commands | same decision as v1 (%) | F1 in v1 | F1 now |
 |---|---|---|---|---|
 | PromptOnly | 549 | 98.54 | 63.50 | 64.04 |
 | LLMJudge | 549 | 99.27 | 70.26 | 70.10 |
@@ -158,7 +170,7 @@ The paper's McNemar test (two-sided, Yates, α = 0.05) on every split:
 
 ## Latency (not comparable: laptop CPU and hosted API vs 4×H100 and local vLLM)
 
-| condition | reported mean ms | observed mean ms |
+| guard | reported mean ms | observed mean ms |
 |---|---|---|
 | NoGuard | 0.00 | 0.00 |
 | PromptOnly | 47.97 | 322.23 |

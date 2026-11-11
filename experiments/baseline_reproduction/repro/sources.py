@@ -1,7 +1,9 @@
 """Fetch the upstream corpora at pinned commits and fingerprint the files used.
 
-Each source is a sparse, blob-filtered clone that materialises only the files
-matched by `patterns`, so ~400 MB of ART binaries are never downloaded.
+Each source is a sparse, blob-filtered clone that materialises only the files matched by
+`patterns`, so about 400 MB of Atomic Red Team binaries are never downloaded.
+
+    directories = sources.fetch_all(configuration)   # {"art": ..., "redcode": ..., "nl2bash": ..., "older_art": ...}
 """
 from __future__ import annotations
 
@@ -10,49 +12,71 @@ import hashlib
 import os
 import subprocess
 
+from .configuration import EXPERIMENT
 
-def _git(*args, cwd=None):
-    return subprocess.run(["git", *args], cwd=cwd, check=True, text=True,
-                          capture_output=True).stdout.strip()
-
-
-def fetch(name, spec, root):
-    """Ensure `root/name` is checked out at spec['commit']; return its path."""
-    d = os.path.join(root, name)
-    if not os.path.isdir(os.path.join(d, ".git")):
-        os.makedirs(d, exist_ok=True)
-        _git("init", "-q", cwd=d)
-        _git("remote", "add", "origin", spec["url"], cwd=d)
-        _git("sparse-checkout", "set", "--no-cone", *spec["patterns"], cwd=d)
-    if _head(d) != spec["commit"]:
-        _git("fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", spec["commit"], cwd=d)
-        _git("checkout", "-q", "--detach", spec["commit"], cwd=d)
-    head = _head(d)
-    if head != spec["commit"]:
-        raise RuntimeError(f"{name}: expected {spec['commit']}, got {head}")
-    return d
+DIRECTORY_OF = {   # name in config.yaml -> name used by the corpus loaders
+    "atomic-red-team": "art",
+    "RedCode": "redcode",
+    "nl2bash": "nl2bash",
+    "atomic-red-team-2026-03-24": "older_art",   # construction variant V3 only
+}
 
 
-def _head(d):
-    try:
-        return _git("rev-parse", "HEAD", cwd=d)
-    except subprocess.CalledProcessError:
-        return None
+def fetch_all(configuration):
+    """Clone every corpus at its pinned commit and require its fingerprint to match config.yaml."""
+    root = os.path.join(EXPERIMENT, "data", "sources")
+    directories = {}
+    for name, pin in configuration["sources"].items():
+        directory = fetch(name, pin, root)
+        found = fingerprint(directory, pin["patterns"])
+        assert found == pin["fingerprint"], f"{name}: fingerprint {found} differs from config.yaml"
+        print(f"✓ {name} at {pin['commit'][:10]}: {found['n_files']} files, fingerprint verified")
+        directories[DIRECTORY_OF[name]] = directory
+    return directories
 
 
-def fingerprint(path, patterns):
-    """SHA-256 over (relative path, file SHA-256) of every file matching patterns."""
-    files = sorted({os.path.relpath(f, path) for p in patterns
-                    for f in glob.glob(os.path.join(path, p)) if os.path.isfile(f)})
-    h = hashlib.sha256()
-    for rel in files:
-        h.update(rel.encode() + b"\0" + sha256_file(os.path.join(path, rel)).encode() + b"\n")
-    return dict(n_files=len(files), sha256=h.hexdigest())
+def fetch(name, pin, root):
+    """Ensure `root/name` is checked out at pin['commit']; return its path."""
+    directory = os.path.join(root, name)
+    if not os.path.isdir(os.path.join(directory, ".git")):
+        os.makedirs(directory, exist_ok=True)
+        _git("init", "-q", cwd=directory)
+        _git("remote", "add", "origin", pin["url"], cwd=directory)
+        _git("sparse-checkout", "set", "--no-cone", *pin["patterns"], cwd=directory)
+    if _head(directory) != pin["commit"]:
+        _git("fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", pin["commit"], cwd=directory)
+        _git("checkout", "-q", "--detach", pin["commit"], cwd=directory)
+    if _head(directory) != pin["commit"]:
+        raise RuntimeError(f"{name}: expected {pin['commit']}, got {_head(directory)}")
+    return directory
+
+
+def fingerprint(directory, patterns):
+    """SHA-256 over (relative path, file SHA-256) of every file matching `patterns`."""
+    files = sorted({os.path.relpath(path, directory)
+                    for pattern in patterns
+                    for path in glob.glob(os.path.join(directory, pattern))
+                    if os.path.isfile(path)})
+    digest = hashlib.sha256()
+    for relative in files:
+        digest.update(relative.encode() + b"\0" + sha256_file(os.path.join(directory, relative)).encode() + b"\n")
+    return dict(n_files=len(files), sha256=digest.hexdigest())
 
 
 def sha256_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _git(*arguments, cwd=None):
+    return subprocess.run(["git", *arguments], cwd=cwd, check=True, text=True, capture_output=True).stdout.strip()
+
+
+def _head(directory):
+    try:
+        return _git("rev-parse", "HEAD", cwd=directory)
+    except subprocess.CalledProcessError:
+        return None

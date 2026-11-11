@@ -133,7 +133,7 @@ Results are reported in two views of the same decisions:
 
 2. **Paper-sized splits.** Every number in the paper is a statistic of one 549-command split.
    To compare like with like, the paper's composition (Table I) is re-drawn from the
-   population **10,000 times** (seeds 0–9,999) with the split recipe of v1 (`dataset.SplitRecipe`):
+   population **10,000 times** (seeds 0–9,999) with the split recipe of v1 (`paper_sized_splits.SplitRecipe`):
    * ART: whole technique families in random order until 149 commands;
    * RedCode-Exec: round-robin over the 20 scenarios, random scripts within each, 71 commands;
    * NL2Bash: whole template families until 299 commands, at most 12 per command head;
@@ -236,9 +236,12 @@ keeps its corpus label.
   seeds:
 
   ```python
-  recipe = dataset.SplitRecipe(population, cfg["paper_sized_splits"]["composition"], head_cap=12)
-  splits = dataset.as_matrix(recipe.draw(range(10_000)))        # row positions into `population`
-  rates  = stats.rates(stats.split_counts(y, your_deny_decisions, splits))
+  from repro import stats
+  from repro.paper_sized_splits import SplitRecipe, Splits
+
+  recipe = SplitRecipe(population, configuration["paper_sized_splits"]["composition"], head_cap=12)
+  splits = Splits(range(10_000), recipe.draw(range(10_000)))
+  rates  = stats.rates(stats.split_counts(population.label_dangerous, your_deny_decisions, splits.rows))
   ```
 * Compare against the *observed* rows in `results/observations.parquet`, paired on
   `command_id`, not against the paper's numbers. Comparing against several baselines needs

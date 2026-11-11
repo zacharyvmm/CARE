@@ -714,3 +714,34 @@ known and before any v2 result existed.
 * **Tests:** 62 reproduction tests and CARE's 10 pass.
 * **Not repeated:** the clean-clone validation of L16 was for `931ebfe`; it has not been re-run
   on this change.
+
+### L19: The notebook is the pipeline (readability refactor, non-methodological)
+* **Date:** 2026-11-11, after L18. Requested by the maintainer: full names instead of aliases,
+  less line noise in the code and in the notebook outputs, the pipeline in the notebook, and
+  objects instead of variables passed along at every step.
+* **Notebook:**
+  * It now calls each step directly; `repro/pipeline.py`, which only forwarded those calls, is
+    removed. Imports use full module names (no `as D`, `as P`, `as R`).
+  * Four objects carry what used to be passed around: `Configuration` (config.yaml and the run
+    mode), `Analysis` (the observations aligned with the population; every table is an
+    attribute computed on first use), `Report` (the tables and figures shown) and `RunRecord`
+    (the checks before the run and the files written after it).
+  * Outputs are compact. Removed: the verbatim protocol sections (the notebook links to
+    `PROTOCOL.md`), the environment dump and the file inventory (both are in
+    `provenance.json`), and the per-stage timers. Shortened: the head-to-head table (one row per
+    pair), the funnel (primary run), the judge-allowed commands (counted per family) and the
+    RedCode table (by scenario kind). The full versions are in `results/report.md`.
+* **Code:** `dataset.py` is split into `corpora.py` (the population) and
+  `paper_sized_splits.py` (the recipe); `evaluation.py` runs the guards and holds the reuse
+  checks; names are spelled out and long one-liners unfolded.
+* **Smoke mode** keeps evenly spaced commands per corpus and uses 3 commands per source in its
+  small splits, so that it now exercises every analysis, including the construction variants.
+  Smoke outputs are not results.
+* **Unchanged:** data, prompts, model, parsing, formulas, the split recipe, the verdict rules
+  and the request fingerprints (the committed replies are still accepted for reuse).
+* **Verification:** before and after the change, the 11 analysis tables are equal
+  cell for cell (`pandas.testing.assert_frame_equal`, exact), and `observations.parquet` is
+  untouched. `provenance.json` and `validation.json` have a simpler layout (no stage timings,
+  no preflight entry; the live path now probes the LLM before it starts). 62 reproduction
+  tests and CARE's 10 pass; smoke mode passes without a key.
+* **Protocol:** `PROTOCOL.md` changes only the module names in its usage example (§6, §12).

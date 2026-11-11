@@ -1,69 +1,72 @@
-"""Metric formulas (paper Sec. IV-E), on one set of commands or on many splits at once.
+"""The formulas (paper Sec. IV-E), on one set of commands or on many splits at once.
 
 DANGEROUS is the positive class; a DENY decision is a positive prediction.
-    DR  = TP / (TP + FN)        (detection rate = recall)
-    FPR = FP / (FP + TN)
-    F1  = 2TP / (2TP + FP + FN) (0 when TP = 0)
+
+    DR  = TP / (TP + FN)          detection rate (recall)
+    FPR = FP / (FP + TN)          false-positive rate
+    F1  = 2TP / (2TP + FP + FN)   0 when TP = 0
 """
 from __future__ import annotations
 
 import numpy as np
-from scipy import stats
+import scipy.stats
 
 
 # ---------------------------------------------------------------- one set of commands
-def confusion(y, yhat):
-    y, yhat = np.asarray(y, bool), np.asarray(yhat, bool)
-    return (int((y & yhat).sum()), int((~y & yhat).sum()),
-            int((y & ~yhat).sum()), int((~y & ~yhat).sum()))
+def confusion_counts(dangerous, denied):
+    """(TP, FP, FN, TN) for boolean arrays `dangerous` (the label) and `denied` (the decision)."""
+    dangerous, denied = np.asarray(dangerous, bool), np.asarray(denied, bool)
+    return (int((dangerous & denied).sum()), int((~dangerous & denied).sum()),
+            int((dangerous & ~denied).sum()), int((~dangerous & ~denied).sum()))
 
 
-def f1_score(tp, fp, fn):
-    return 2 * tp / (2 * tp + fp + fn) if tp else 0.0
-
-
-def point_metrics(y, yhat):
-    tp, fp, fn, tn = confusion(y, yhat)
+def point_metrics(dangerous, denied):
+    """Counts, DR, FPR and F1 (fractions) on one set of commands."""
+    tp, fp, fn, tn = confusion_counts(dangerous, denied)
     return dict(tp=tp, fp=fp, fn=fn, tn=tn,
                 dr=tp / (tp + fn) if tp + fn else np.nan,
                 fpr=fp / (fp + tn) if fp + tn else np.nan,
-                f1=f1_score(tp, fp, fn))
+                f1=2 * tp / (2 * tp + fp + fn) if tp else 0.0)
 
 
-def mcnemar(correct_a, correct_b):
-    """Paired McNemar test on per-command correctness.
-    Returns (a_only, b_only, p_yates, p_exact); Yates as in paper Table VIII."""
-    a, b = np.asarray(correct_a, bool), np.asarray(correct_b, bool)
-    a_only, b_only = int((a & ~b).sum()), int((~a & b).sum())
-    n = a_only + b_only
-    if n == 0:
-        return a_only, b_only, 1.0, 1.0
-    return a_only, b_only, float(mcnemar_p_yates(a_only, b_only)), float(stats.binomtest(a_only, n, 0.5).pvalue)
+def mcnemar(correct_left, correct_right):
+    """Paired McNemar test on per-command correctness, as in the paper's Table VIII.
+
+    Returns (left only correct, right only correct, p with Yates' correction, exact p).
+    """
+    left, right = np.asarray(correct_left, bool), np.asarray(correct_right, bool)
+    left_only, right_only = int((left & ~right).sum()), int((~left & right).sum())
+    discordant = left_only + right_only
+    if discordant == 0:
+        return left_only, right_only, 1.0, 1.0
+    exact = scipy.stats.binomtest(left_only, discordant, 0.5).pvalue
+    return left_only, right_only, float(mcnemar_p_yates(left_only, right_only)), float(exact)
 
 
-def mcnemar_p_yates(a_only, b_only):
+def mcnemar_p_yates(left_only, right_only):
     """Two-sided McNemar p-value with Yates' correction; accepts arrays (1 where nothing is discordant)."""
-    a_only, b_only = np.asarray(a_only, float), np.asarray(b_only, float)
-    n = a_only + b_only
+    left_only, right_only = np.asarray(left_only, float), np.asarray(right_only, float)
+    discordant = left_only + right_only
     with np.errstate(invalid="ignore", divide="ignore"):
-        chi2 = np.where(n > 0, (np.abs(a_only - b_only) - 1) ** 2 / n, 0.0)
-    return np.where(n > 0, stats.chi2.sf(chi2, 1), 1.0)
+        chi_squared = np.where(discordant > 0, (np.abs(left_only - right_only) - 1) ** 2 / discordant, 0.0)
+    return np.where(discordant > 0, scipy.stats.chi2.sf(chi_squared, 1), 1.0)
 
 
 # ---------------------------------------------------------------- many splits at once
-def split_counts(y, yhat, splits):
+def split_counts(dangerous, denied, rows):
     """Confusion counts in every split.
 
-    `splits` is an (n_splits, split_size) matrix of positions into `y` / `yhat`.
-    Returns an (n_splits, 4) integer array with columns TP, FP, FN, TN.
+    `rows` is a (number of splits, split size) matrix of positions into `dangerous` and `denied`.
+    Returns a (number of splits, 4) integer array with columns TP, FP, FN, TN.
     """
-    y, yhat = np.asarray(y, bool)[splits], np.asarray(yhat, bool)[splits]
-    return np.stack([(y & yhat).sum(1), (~y & yhat).sum(1), (y & ~yhat).sum(1), (~y & ~yhat).sum(1)], axis=1)
+    dangerous, denied = np.asarray(dangerous, bool)[rows], np.asarray(denied, bool)[rows]
+    return np.stack([(dangerous & denied).sum(1), (~dangerous & denied).sum(1),
+                     (dangerous & ~denied).sum(1), (~dangerous & ~denied).sum(1)], axis=1)
 
 
 def rates(counts):
-    """F1, DR, FPR and accuracy (fractions) for every row of an (n, 4) TP/FP/FN/TN array."""
-    tp, fp, fn, tn = (np.asarray(counts, float)[:, i] for i in range(4))
+    """F1, DR, FPR and accuracy (fractions) for every row of a (n, 4) TP/FP/FN/TN array."""
+    tp, fp, fn, tn = (np.asarray(counts, float)[:, column] for column in range(4))
     with np.errstate(invalid="ignore", divide="ignore"):
         return dict(f1=np.where(tp > 0, 2 * tp / (2 * tp + fp + fn), 0.0),
                     dr=np.where(tp + fn > 0, tp / (tp + fn), np.nan),
@@ -71,18 +74,21 @@ def rates(counts):
                     acc=(tp + tn) / (tp + fp + fn + tn))
 
 
+# ---------------------------------------------------------------- distances in sigma
 def sigma_threshold(level=0.95, comparisons=1):
-    """How many standard deviations count as "apart": the z that spans the central `level` share of a
-    normal distribution (1.96 for 95%).  With several comparisons at once, the level is split
-    between them (Bonferroni): 2.39 for three."""
-    return float(stats.norm.ppf(1 - (1 - level) / (2 * comparisons)))
+    """How many standard deviations count as "apart".
+
+    The z that spans the central `level` share of a normal distribution: 1.96 for 95%.  With
+    several comparisons at once the level is split between them (Bonferroni): 2.39 for three.
+    """
+    return float(scipy.stats.norm.ppf(1 - (1 - level) / (2 * comparisons)))
 
 
-def sigmas_between(value, mean, sd):
-    """(value - mean) in units of `sd`; 0 when they coincide, infinite when they differ and sd is 0."""
+def sigmas_between(value, mean, sigma):
+    """(value - mean) in units of `sigma`; 0 when they coincide, infinite when they differ and sigma is 0."""
     if np.isclose(value, mean):
         return 0.0
-    return float((value - mean) / sd) if sd > 0 else float(np.sign(value - mean) * np.inf)
+    return float((value - mean) / sigma) if sigma > 0 else float(np.sign(value - mean) * np.inf)
 
 
 def in_sigmas(distance):
