@@ -73,8 +73,7 @@ class Report:
         """Table II at a glance: per guard and metric, "reported → observed mean (σ over the splits)"."""
         comparison = self.analysis.comparison
         rates = comparison[comparison.metric.isin(["F1", "DR", "FPR"]) & (comparison.condition != "NoGuard")]
-        cells = [f"{row.reported:.2f} → **{row.observed:.2f}** (σ = {row.sigma:.2f}) "
-                 + ("∈" if row.within_threshold else "∉") for row in rates.itertuples()]
+        cells = [f"{row.reported:.2f} → **{row.observed:.2f}** (σ = {row.sigma:.2f})" for row in rates.itertuples()]
         wide = rates.assign(cell=cells).pivot(index="condition", columns="metric", values="cell")
         return _in_paper_order(wide[["F1", "DR", "FPR"]].reset_index())
 
@@ -306,8 +305,8 @@ class Report:
         number_of_splits = len(self.analysis.splits)
         section(f"Table II: reported → observed on {number_of_splits:,} paper-sized splits (mean, σ; primary run)",
                 self.table_ii(),
-                f"σ is the standard deviation over the splits. ∈ / ∉: the reported value is within / beyond "
-                f"{threshold:.2f}σ of the mean.")
+                f"σ is the standard deviation over the splits. A reported value more than {threshold:.2f}σ from "
+                "the mean is one that no plausible split yields.")
         section("Full corpora: every guard on every command (primary run)", self.full_corpora())
         section("CARE vs each comparator on the paper-sized splits (left − right, percentage points)",
                 self.paired_differences(),

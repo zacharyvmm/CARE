@@ -410,7 +410,7 @@ def test_without_a_key_the_committed_observations_are_reused():
     assert not with_key_but_reuse.query_llm_live
 
 
-def test_table_ii_shows_sigma_and_marks_whether_the_reported_value_is_within_the_threshold():
+def test_table_ii_shows_reported_then_observed_mean_and_sigma():
     def row(guard, metric, reported, mean, sigma, within):
         return dict(condition=guard, metric=metric, reported=reported, observed=mean, sigma=sigma,
                     within_threshold=within)
@@ -422,7 +422,7 @@ def test_table_ii_shows_sigma_and_marks_whether_the_reported_value_is_within_the
     analysis = types.SimpleNamespace(comparison=comparison, configuration=CONFIGURATION)
     table = Report(analysis).table_ii()
     assert table.guard.tolist() == ["LLMJudge", "CARE"]                      # the paper's row order
-    assert table.F1.iloc[1] == "85.64 → **59.20** (σ = 4.30) ∉" and table.F1.iloc[0].endswith("∈")
+    assert table.F1.tolist() == ["73.10 → **70.30** (σ = 3.10)", "85.64 → **59.20** (σ = 4.30)"]
 
 
 # ---------------------------------------------------------------- LLM reply cache and reuse (D18, D20)

@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-11-11T20:35:39.297828+00:00",
+  "generated_utc": "2026-11-11T20:51:38.644570+00:00",
   "mode": "full",
   "run_label": "confirmatory-v2",
   "protocol_version": "2.1",
@@ -175,7 +175,7 @@
       "matplotlib": "3.11.2"
     },
     "lockfile_mismatches": {},
-    "repo_head": "0c72ae8cadbc62a21cd435af368a3e90acc78808",
+    "repo_head": "8e04b36d6dc3c8895cc6a42df3f431907498208f",
     "uncommitted_changes": true
   },
   "unit_tests": "72 passed in 1.35s",

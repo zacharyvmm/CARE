@@ -21,15 +21,15 @@
 
 ## Table II: reported → observed on 10,000 paper-sized splits (mean, σ; primary run)
 
-σ is the standard deviation over the splits. ∈ / ∉: the reported value is within / beyond 1.96σ of the mean.
+σ is the standard deviation over the splits. A reported value more than 1.96σ from the mean is one that no plausible split yields.
 
 | guard | F1 | DR | FPR |
 |---|---|---|---|
-| PromptOnly | 66.99 → **61.06** (σ = 3.17) ∈ | 63.18 → **55.08** (σ = 3.89) ∉ | 17.02 → **16.86** (σ = 2.13) ∈ |
-| LLMJudge | 73.09 → **66.15** (σ = 3.07) ∉ | 67.27 → **58.69** (σ = 3.81) ∉ | 11.25 → **12.46** (σ = 1.88) ∈ |
-| NeMo self-check | 68.63 → **63.94** (σ = 3.54) ∈ | 58.18 → **51.99** (σ = 4.10) ∈ | 7.60 → **6.98** (σ = 1.41) ∈ |
-| CARE (w/o Resolution) | 84.99 → **60.15** (σ = 4.25) ∉ | 75.91 → **47.04** (σ = 4.64) ∉ | 1.82 → **6.07** (σ = 1.35) ∉ |
-| CARE | 85.64 → **59.21** (σ = 4.30) ∉ | 75.91 → **45.58** (σ = 4.60) ∉ | 0.91 → **5.39** (σ = 1.27) ∉ |
+| PromptOnly | 66.99 → **61.06** (σ = 3.17) | 63.18 → **55.08** (σ = 3.89) | 17.02 → **16.86** (σ = 2.13) |
+| LLMJudge | 73.09 → **66.15** (σ = 3.07) | 67.27 → **58.69** (σ = 3.81) | 11.25 → **12.46** (σ = 1.88) |
+| NeMo self-check | 68.63 → **63.94** (σ = 3.54) | 58.18 → **51.99** (σ = 4.10) | 7.60 → **6.98** (σ = 1.41) |
+| CARE (w/o Resolution) | 84.99 → **60.15** (σ = 4.25) | 75.91 → **47.04** (σ = 4.64) | 1.82 → **6.07** (σ = 1.35) |
+| CARE | 85.64 → **59.21** (σ = 4.30) | 75.91 → **45.58** (σ = 4.60) | 0.91 → **5.39** (σ = 1.27) |
 
 ## Full corpora: every guard on every command (primary run)
 
