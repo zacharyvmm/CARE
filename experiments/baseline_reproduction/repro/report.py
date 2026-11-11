@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from . import HERE
+from . import stats as S
 from .analysis import CONDITIONS, CORPORA, FULL, NOT_COUNTED, SPLITS, STATIC
 
 # ------------------------------------------------------------------ figures
@@ -31,6 +32,7 @@ def _style(ax, grid="x"):
 
 def figures(comparison, split_f1, n_splits, outdir):
     """Write both figures; return {name: path}.  `split_f1` maps condition -> F1 of every paper-sized split."""
+    z = comparison.threshold.dropna().iloc[0]
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -44,8 +46,9 @@ def figures(comparison, split_f1, n_splits, outdir):
     for ax, (metric, title) in zip(axes, [("F1", "F1 % ↑"), ("DR", "Detection rate % ↑"), ("FPR", "False-positive rate % ↓")]):
         _style(ax)
         d = t[t.metric == metric].set_index("condition").loc[guards]
-        ax.hlines(rows, d.range_lo, d.range_hi, color=OURS, lw=2)
-        ax.plot(d.observed, rows, "o", ms=8, color=OURS, mec=SURFACE, mew=2, label="Observed: mean and range of the paper-sized splits")
+        ax.hlines(rows, d.observed - z * d.sigma, d.observed + z * d.sigma, color=OURS, lw=2)
+        ax.plot(d.observed, rows, "o", ms=8, color=OURS, mec=SURFACE, mew=2,
+                label=f"Observed: mean ± {z:.2f}σ over the paper-sized splits")
         ax.plot(d.reported, rows, "D", ms=8, mfc="none", mec=PAPER, mew=2, label="Reported (Table II)")
         ax.set_title(title, color=INK, fontsize=11, loc="left")
         ax.set_yticks(rows, guards, color=INK)
@@ -84,10 +87,10 @@ def _in_order(df, column="condition"):
 
 
 def headline(comparison):
-    """Table II at a glance: per condition and metric, "reported → observed [range of splits]"."""
+    """Table II at a glance: per condition and metric, "reported → observed mean (σ = spread over the splits)"."""
     t = comparison[comparison.metric.isin(["F1", "DR", "FPR"]) & (comparison.condition != "NoGuard")]
-    cell = lambda r: (f"{r.reported:.2f} → **{r.observed:.2f}** [{r.range_lo:.1f}, {r.range_hi:.1f}] "  # noqa: E731
-                      + ("∈" if r.inside_range else "∉"))
+    cell = lambda r: (f"{r.reported:.2f} → **{r.observed:.2f}** (σ = {r.sigma:.2f}) "  # noqa: E731
+                      + ("∈" if r.within_threshold else "∉"))
     wide = t.assign(cell=t.apply(cell, axis=1)).pivot(index="condition", columns="metric", values="cell")
     return _in_order(wide[["F1", "DR", "FPR"]].reset_index())
 
@@ -108,12 +111,12 @@ def corpora_view(metrics, run=1):
 def differences_view(differences):
     d = differences.copy()
     d["pair"] = d.left + " − " + d.right
-    d["mean [range]"] = d.apply(lambda r: f"{r.value:+.2f} [{r.lo:.1f}, {r.hi:.1f}]", axis=1)
-    d["simultaneous range"] = d.apply(lambda r: "—" if np.isnan(r.adj_lo) else f"[{r.adj_lo:.1f}, {r.adj_hi:.1f}]", axis=1)
+    d["mean difference"] = d.apply(lambda r: f"{r.value:+.2f} (σ = {r.sigma:.2f})", axis=1)
+    d["distance from 0"] = d.sigmas_from_zero.map(S.in_sigmas)
     d["left better in"] = d.share_left_better.map(lambda v: f"{100 * v:.1f}% of splits")
     d["on the full corpora"] = d.full_corpora.map(lambda v: f"{v:+.2f}")
     d["metric"] = d.metric.str.replace("delta_", "")
-    return d[["pair", "metric", "mean [range]", "simultaneous range", "left better in", "on the full corpora"]]
+    return d[["pair", "metric", "mean difference", "distance from 0", "left better in", "on the full corpora"]]
 
 
 def mcnemar_view(differences):
@@ -142,9 +145,9 @@ def funnel_view(funnel):
 
 
 def oracle_view(oracle):
-    o = oracle.assign(f1_range=oracle.apply(lambda r: f"[{r.f1_lo:.1f}, {r.f1_hi:.1f}]", axis=1))
-    return o[["bound", "judged_per_split", "f1", "f1_range", "dr", "fpr"]].rename(columns={
-        "judged_per_split": "commands judged per split", "f1": "F1", "f1_range": "F1 range", "dr": "DR", "fpr": "FPR"})
+    o = oracle.assign(f1=oracle.apply(lambda r: f"{r.f1:.2f} (σ = {r.f1_sigma:.2f})", axis=1))
+    return o[["bound", "judged_per_split", "f1", "dr", "fpr"]].rename(columns={
+        "judged_per_split": "commands judged per split", "f1": "F1", "dr": "DR", "fpr": "FPR"})
 
 
 def label_view(label_sens):
@@ -230,10 +233,14 @@ def results_markdown(res, cfg, run):
     L.append("> Every comparison with the paper is **not directly comparable**: the population is rebuilt from the "
              "public corpora (the authors' 549 commands are unreleased) and labels are corpus-level (paper Table I).\n")
     L += ["## Claim verdicts\n", md_table(res.claims[["claim_id", "claim", "outcome", "rationale"]])]
-    L += [f"\n## Table II: reported → observed on {n:,} paper-sized splits (mean [range]; primary run)\n",
-          "∈ / ∉: the reported value lies inside / outside the range.\n", md_table(headline(res.comparison))]
+    z = res.comparison.threshold.dropna().iloc[0]
+    L += [f"\n## Table II: reported → observed on {n:,} paper-sized splits (mean, σ; primary run)\n",
+          f"σ is the standard deviation over the splits. ∈ / ∉: the reported value is within / beyond {z:.2f}σ of the "
+          "mean.\n", md_table(headline(res.comparison))]
     L += ["\n## Full corpora: every guard on every command (primary run)\n", md_table(corpora_view(res.metrics))]
     L += ["\n## CARE vs each comparator on the paper-sized splits (left − right, percentage points)\n",
+          f"Two guards count as separated when the mean difference is more than {z:.2f}σ from 0 "
+          f"({res.differences.threshold_simultaneous.max():.2f}σ for C10, which judges three comparators at once).\n",
           md_table(differences_view(res.differences)),
           "\nThe paper's McNemar test (two-sided, Yates, α = 0.05) on every split:\n", md_table(mcnemar_view(res.differences))]
     L += ["\n## Resolution funnel\n", md_table(funnel_view(res.funnel))]

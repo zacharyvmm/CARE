@@ -11,8 +11,8 @@ All dates are 2026-11-07 (UTC) unless stated.
 
 ## Where things stand (index, not an entry)
 
-The current protocol is **v2.0** (`PROTOCOL.md`): every guard is run on every command of the
-corpora. Entries D1–D23 and L1–L11 were written for protocol v1, which evaluated one
+The current protocol is **v2.1** (`PROTOCOL.md`): every guard is run on every command of the
+corpora, and the spread over paper-sized splits is reported as σ. Entries D1–D23 and L1–L11 were written for protocol v1, which evaluated one
 549-command sample (`archive/v1/`). This table says which of them still apply.
 
 | Entries | Topic | Status under v2.0 |
@@ -29,7 +29,8 @@ corpora. Entries D1–D23 and L1–L11 were written for protocol v1, which evalu
 | D18, D20 | LLM cache identity; reuse gated on request identity | in force |
 | D24–D28 | full corpora; paper-sized splits; verdict rules v2.0; set-aside commands; label audit | protocol v2.0 |
 | L1–L11 | pilot, v1 confirmatory run, reviews and refactors | v1 history |
-| L12– | v2 restructure, freeze, confirmatory run | protocol v2.0 |
+| D29 | spread reported as σ; verdict rules stated in σ | protocol v2.1; replaces the percentile range of D25 and D26, verdicts unchanged |
+| L12– | v2 restructure, freeze, confirmatory run, clean clone | protocol v2.0–v2.1 |
 
 ---
 
@@ -676,3 +677,40 @@ known and before any v2 result existed.
   Parquet tables (including `observations.parquet`), plus `report.md` and both figures: 15
   files, all byte-identical in the clean clone. The record
   `results/executed/clean_clone_validation.json` lists them and was correct.
+
+### D29: The spread over paper-sized splits is reported as σ (protocol v2.1)
+* **Change:** for every statistic on the paper-sized splits we report the mean and the standard
+  deviation over the 10,000 splits, written "σ = X". The verdict rules use distances in σ:
+  * numeric claims (C1–C5, C8): *not supported* if the reported value is more than 1.96σ from
+    the mean;
+  * C6: the mean paired difference must be more than 1.96σ from 0;
+  * C10: 2.39σ, the Bonferroni threshold for three comparators (level 1 − 0.05/3).
+  Protocol v2.0 used the interval holding the central 95% of the splits (98.3% for C10).
+* **Rationale:** requested by the maintainer, for readability: "mean, σ" is more familiar than a
+  percentile range, and the distance of a reported value can be stated directly (CARE's
+  reported F1 is 5.8σ above the mean).
+* **Post hoc:** the change was made after the v2 results were known. Both rules were applied to
+  the same decisions: all 15 Table II comparisons, the escalation rate and all 12 paired
+  differences fall on the same side, and **all 11 verdicts are identical**.
+* **What it assumes:** 1.96σ matches the 95% interval only for a normal distribution. The
+  statistics are close to normal over the splits, with a slight lean to the left, so mean ±
+  1.96σ sits a little higher than the percentile interval (for static CARE's F1, [51.8, 68.5]
+  against [51.4, 67.9]). The case nearest the threshold is C3: PromptOnly's reported F1 is
+  1.87σ above the mean; under v2.0 it was inside the interval by 0.01.
+* **Unchanged:** the population, the runs, the observations, the split recipe and seeds, and
+  every metric formula. `metrics.parquet` keeps the minimum and maximum over the splits.
+* **Affects:** the wording and the columns of `comparison`, `paired_differences`,
+  `oracle_bounds` and `claims`; `PROTOCOL.md` §6, §7 and §11; the first figure.
+
+### L18: Execution of protocol v2.1
+* **Date:** 2026-11-11, after D29.
+* **Run:** the notebook was re-executed without a key (reuse mode); no LLM call was made.
+  `observations.parquet` is byte-identical to the live run's (L14).
+* **Verdicts:** all 11 are identical to those of v2.0 (compared programmatically against the
+  v2.0 `claims.parquet` at `fb05b60`); only the rationale strings now quote σ.
+* **Tables:** `comparison`, `paired_differences`, `oracle_bounds`, `metrics` and `claims` have
+  σ columns in place of range bounds; the other tables are unchanged. The first figure draws
+  mean ± 1.96σ.
+* **Tests:** 62 reproduction tests and CARE's 10 pass.
+* **Not repeated:** the clean-clone validation of L16 was for `931ebfe`; it has not been re-run
+  on this change.

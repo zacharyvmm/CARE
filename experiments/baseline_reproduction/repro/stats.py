@@ -71,8 +71,20 @@ def rates(counts):
                     acc=(tp + tn) / (tp + fp + fn + tn))
 
 
-def central_range(x, level=0.95):
-    """The interval that holds the central `level` share of the values in `x`."""
-    a = (1 - level) / 2
-    lo, hi = np.nanquantile(np.asarray(x, float), [a, 1 - a])
-    return float(lo), float(hi)
+def sigma_threshold(level=0.95, comparisons=1):
+    """How many standard deviations count as "apart": the z that spans the central `level` share of a
+    normal distribution (1.96 for 95%).  With several comparisons at once, the level is split
+    between them (Bonferroni): 2.39 for three."""
+    return float(stats.norm.ppf(1 - (1 - level) / (2 * comparisons)))
+
+
+def sigmas_between(value, mean, sd):
+    """(value - mean) in units of `sd`; 0 when they coincide, infinite when they differ and sd is 0."""
+    if np.isclose(value, mean):
+        return 0.0
+    return float((value - mean) / sd) if sd > 0 else float(np.sign(value - mean) * np.inf)
+
+
+def in_sigmas(distance):
+    """A distance formatted in standard deviations, e.g. "+5.8σ" (never "-0.0σ")."""
+    return f"{round(distance, 1) + 0.0:+.1f}σ"

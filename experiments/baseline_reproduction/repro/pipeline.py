@@ -339,7 +339,6 @@ class Splits:
     """Splits with the paper's composition, re-drawn from the population (one per seed)."""
     seeds: range
     composition: dict
-    level: float       # central share of the splits reported as "the range"
     draws: dict        # source -> (n_splits, quota) row positions into the population
 
     @property
@@ -357,7 +356,7 @@ def draw_paper_sized_splits(population, cfg, run):
     first, last = ps["seeds"] if run.full else cfg["smoke"]["seeds"]
     seeds = range(first, last + 1)
     draws = D.SplitRecipe(population, composition, ps["nl2bash_head_cap"]).draw(seeds)
-    splits = Splits(seeds, composition, ps["range_level"], draws)
+    splits = Splits(seeds, composition, draws)
     y = population.label_dangerous.to_numpy()[splits.matrix]
     print(f"✓ {len(splits):,} splits of {splits.matrix.shape[1]} commands "
           f"({int(y[0].sum())} DANGEROUS / {int((~y[0]).sum())} SAFE each)")
@@ -387,10 +386,10 @@ class Results:
 def analyse(obs, population, splits, sources, manifest, cfg, run):
     """Every analysis table, from the observations, the population and the paper-sized splits."""
     o = A.Observed(obs, population)
-    matrix, level = splits.matrix, splits.level
+    matrix = splits.matrix
 
     # 1. What each guard decided: on the full corpora, and on the paper-sized splits
-    metrics = pd.concat([A.corpus_metrics(o), A.split_metrics(o, matrix, level)], ignore_index=True)
+    metrics = pd.concat([A.corpus_metrics(o), A.split_metrics(o, matrix)], ignore_index=True)
 
     # 2. Reported vs observed, and CARE against each comparator
     comparison = A.compare_with_paper(metrics, cfg)
@@ -398,7 +397,7 @@ def analyse(obs, population, splits, sources, manifest, cfg, run):
 
     # 3. Resolution: what the judge sees, what any judge could achieve, and how much the labels matter
     funnel = A.resolution_funnel(o, matrix, cfg)
-    oracle = A.oracle_bounds(o, matrix, level)
+    oracle = A.oracle_bounds(o, matrix)
     label_sens = A.label_sensitivity(o, load_label_audit(cfg))
 
     # 4. Diagnostics
@@ -467,7 +466,7 @@ def write_provenance(run, cfg, integrity, tests, sources, manifest, splits, llm_
         paper=cfg["paper"], sources=sources.records,
         population=dict(manifest, sha256=sha(cfg["population"]["file"])),
         paper_sized_splits=dict(n=len(splits), seeds=[splits.seeds[0], splits.seeds[-1]], composition=splits.composition,
-                                range_level=splits.level, sha256=hashlib.sha256(splits.matrix.tobytes()).hexdigest()),
+                                level=cfg["paper_sized_splits"]["level"], sha256=hashlib.sha256(splits.matrix.tobytes()).hexdigest()),
         llm=dict(llm_run, requested_config=cfg["llm"], executed_request_identity=identity),
         environment=integrity["environment"], unit_tests=tests, preflight=checks,
         stage_seconds={k: round(v, 2) for k, v in stage_seconds.items()},

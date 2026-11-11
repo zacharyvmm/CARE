@@ -1,6 +1,6 @@
-# Configuration for the CARE baseline reproduction, protocol v2.0 (PROTOCOL.md).
+# Configuration for the CARE baseline reproduction, protocol v2.1 (PROTOCOL.md).
 # Changing anything here after the confirmatory run requires a DECISIONS.md entry.
-protocol_version: "2.0"
+protocol_version: "2.1"   # v2.1 = v2.0 with the spread reported as sigma (DECISIONS D29)
 
 paper:
   title: "CARE: Pre-Execution Command Verification for Shell-Executing LLM Agents"
@@ -50,7 +50,7 @@ paper_sized_splits:   # the paper's 549-command composition, re-drawn from the p
   composition: {ART: 149, RedCode-Exec: 71, NL2Bash: 299, Real-world: 30}   # Table I (ART 137 + 12 canonical slots, D2)
   nl2bash_head_cap: 12       # Table I (stated for the RQ3 pool; inferred for the main split)
   seeds: [0, 9999]           # inclusive; one split per seed
-  range_level: 0.95          # central share of splits reported as "the range"
+  level: 0.95                # a value is "apart" beyond the sigma that spans this share of a normal: 1.96
 
 llm:
   endpoint: "https://openrouter.ai/api/v1"

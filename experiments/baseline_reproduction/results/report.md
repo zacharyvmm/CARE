@@ -1,4 +1,4 @@
-# Results: CARE baseline reproduction (protocol v2.0)
+# Results: CARE baseline reproduction (protocol v2.1)
 
 > Every comparison with the paper is **not directly comparable**: the population is rebuilt from the public corpora (the authors' 549 commands are unreleased) and labels are corpus-level (paper Table I).
 
@@ -6,29 +6,29 @@
 
 | claim_id | claim | outcome | rationale |
 |---|---|---|---|
-| C1 | Table II row 'CARE (w/o Resolution)': F1 84.99 | not supported (on this reconstruction) | reported F1 84.99; paper-sized splits: mean 60.15, range [51.4, 67.9], maximum 75.27; full corpora 49.46 |
-| C2 | Table II row 'CARE': F1 85.64 | not supported (on this reconstruction) | reported F1 85.64; paper-sized splits: mean 59.21, range [50.3, 67.0], maximum 74.46; full corpora 48.59 |
-| C3 | Table II row 'PromptOnly': F1 66.99 | inconclusive (not contradicted) | reported F1 66.99; paper-sized splits: mean 61.06, range [54.7, 67.0], maximum 72.06; full corpora 24.20 |
-| C4 | Table II row 'LLMJudge': F1 73.09 | not supported (on this reconstruction) | reported F1 73.09; paper-sized splits: mean 66.15, range [59.9, 71.9], maximum 76.62; full corpora 30.68 |
-| C5 | Table II row 'NeMo self-check': F1 68.63 | inconclusive (not contradicted) | reported F1 68.63; paper-sized splits: mean 63.94, range [56.8, 70.6], maximum 76.32; full corpora 33.61 |
-| C6 | CARE (w/o Resolution) significantly outperforms PromptOnly and LLMJudge | inconclusive | vs PromptOnly: accuracy +3.24 pp, range [-2.2, 8.4] (paper +14.21 pp); the paper's McNemar test favours CARE in 35% of splits and PromptOnly in 0%; vs LLMJudge: accuracy -0.84 pp, range [-5.8, 4.0] (paper +9.11 pp); the paper's McNemar test favours CARE in 2% of splits and LLMJudge in 10% |
+| C1 | Table II row 'CARE (w/o Resolution)': F1 84.99 | not supported (on this reconstruction) | reported F1 84.99; paper-sized splits: mean 60.15, σ = 4.25, so the reported value is +5.8σ from the mean; best split 75.27; full corpora 49.46 |
+| C2 | Table II row 'CARE': F1 85.64 | not supported (on this reconstruction) | reported F1 85.64; paper-sized splits: mean 59.21, σ = 4.30, so the reported value is +6.2σ from the mean; best split 74.46; full corpora 48.59 |
+| C3 | Table II row 'PromptOnly': F1 66.99 | inconclusive (not contradicted) | reported F1 66.99; paper-sized splits: mean 61.06, σ = 3.17, so the reported value is +1.9σ from the mean; best split 72.06; full corpora 24.20 |
+| C4 | Table II row 'LLMJudge': F1 73.09 | not supported (on this reconstruction) | reported F1 73.09; paper-sized splits: mean 66.15, σ = 3.07, so the reported value is +2.3σ from the mean; best split 76.62; full corpora 30.68 |
+| C5 | Table II row 'NeMo self-check': F1 68.63 | inconclusive (not contradicted) | reported F1 68.63; paper-sized splits: mean 63.94, σ = 3.54, so the reported value is +1.3σ from the mean; best split 76.32; full corpora 33.61 |
+| C6 | CARE (w/o Resolution) significantly outperforms PromptOnly and LLMJudge | inconclusive | vs PromptOnly: accuracy +3.24 pp, σ = 2.73 (+1.2σ from 0; paper +14.21 pp); the paper's McNemar test favours CARE in 35% of splits and PromptOnly in 0%; vs LLMJudge: accuracy -0.84 pp, σ = 2.58 (-0.3σ from 0; paper +9.11 pp); the paper's McNemar test favours CARE in 2% of splits and LLMJudge in 10% |
 | C7 | Resolution lowers FPR (1.82 -> 0.91) at unchanged DR | inconclusive (label-sensitive) | full corpora, primary run; corpus-level labels (paper Table I): FPR -0.38 pp, DR -2.27 pp; audited labels for the judge-allowed commands: FPR -0.60 pp, DR +0.00 pp |
-| C8 | About 4.2% of commands (23/549) reach the LLM judge | inconclusive (not contradicted) | reported 4.19%; paper-sized splits: mean 4.21%, range [2.4, 6.2]; full corpora 1.93% |
+| C8 | About 4.2% of commands (23/549) reach the LLM judge | inconclusive (not contradicted) | reported 4.19%; paper-sized splits: mean 4.21%, σ = 1.01 (+0.0σ from the mean); full corpora 1.93% |
 | C9 | The judge never converts a DANGEROUS command to ALLOW | inconclusive (label-sensitive) | full corpora, all runs; corpus-level labels (paper Table I): DANGEROUS commands the judge allowed, per run [23, 23, 22]; audited labels for the judge-allowed commands: DANGEROUS commands the judge allowed, per run [0, 0, 0] (23 of 23 such commands audited) |
-| C10 | CARE attains the highest F1 among the evaluated guards | inconclusive | CARE - LLMJudge: F1 -6.94 pp, simultaneous range [-18.9, 3.7]; CARE (w/o Resolution) - LLMJudge: F1 -6.00 pp, simultaneous range [-18.0, 4.5]; coverage: 6 of the paper's 12 rows |
+| C10 | CARE attains the highest F1 among the evaluated guards | inconclusive | CARE - LLMJudge: F1 -6.94 pp, σ = 4.96 (-1.4σ from 0); CARE (w/o Resolution) - LLMJudge: F1 -6.00 pp, σ = 4.96 (-1.2σ from 0); separated only beyond 2.39σ; coverage: 6 of the paper's 12 rows |
 | C11 | Mean latency 0.34 ms (CARE w/o Resolution) and 2.32 ms (CARE) | inconclusive | observed mean 0.45 ms (static) and 13.04 ms (with Resolution) on a laptop CPU with a hosted API; the paper used 4xH100 with local vLLM, so the values are not comparable |
 
-## Table II: reported → observed on 10,000 paper-sized splits (mean [range]; primary run)
+## Table II: reported → observed on 10,000 paper-sized splits (mean, σ; primary run)
 
-∈ / ∉: the reported value lies inside / outside the range.
+σ is the standard deviation over the splits. ∈ / ∉: the reported value is within / beyond 1.96σ of the mean.
 
 | condition | F1 | DR | FPR |
 |---|---|---|---|
-| PromptOnly | 66.99 → **61.06** [54.7, 67.0] ∈ | 63.18 → **55.08** [47.3, 62.7] ∉ | 17.02 → **16.86** [12.8, 21.0] ∈ |
-| LLMJudge | 73.09 → **66.15** [59.9, 71.9] ∉ | 67.27 → **58.69** [50.9, 65.9] ∉ | 11.25 → **12.46** [8.8, 16.1] ∈ |
-| NeMo self-check | 68.63 → **63.94** [56.8, 70.6] ∈ | 58.18 → **51.99** [44.1, 60.0] ∈ | 7.60 → **6.98** [4.3, 9.7] ∈ |
-| CARE (w/o Resolution) | 84.99 → **60.15** [51.4, 67.9] ∉ | 75.91 → **47.04** [37.7, 55.9] ∉ | 1.82 → **6.07** [3.6, 8.8] ∉ |
-| CARE | 85.64 → **59.21** [50.3, 67.0] ∉ | 75.91 → **45.58** [36.4, 54.1] ∉ | 0.91 → **5.39** [3.0, 7.9] ∉ |
+| PromptOnly | 66.99 → **61.06** (σ = 3.17) ∈ | 63.18 → **55.08** (σ = 3.89) ∉ | 17.02 → **16.86** (σ = 2.13) ∈ |
+| LLMJudge | 73.09 → **66.15** (σ = 3.07) ∉ | 67.27 → **58.69** (σ = 3.81) ∉ | 11.25 → **12.46** (σ = 1.88) ∈ |
+| NeMo self-check | 68.63 → **63.94** (σ = 3.54) ∈ | 58.18 → **51.99** (σ = 4.10) ∈ | 7.60 → **6.98** (σ = 1.41) ∈ |
+| CARE (w/o Resolution) | 84.99 → **60.15** (σ = 4.25) ∉ | 75.91 → **47.04** (σ = 4.64) ∉ | 1.82 → **6.07** (σ = 1.35) ∉ |
+| CARE | 85.64 → **59.21** (σ = 4.30) ∉ | 75.91 → **45.58** (σ = 4.60) ∉ | 0.91 → **5.39** (σ = 1.27) ∉ |
 
 ## Full corpora: every guard on every command (primary run)
 
@@ -42,22 +42,24 @@
 
 ## CARE vs each comparator on the paper-sized splits (left − right, percentage points)
 
-| pair | metric | mean [range] | simultaneous range | left better in | on the full corpora |
+Two guards count as separated when the mean difference is more than 1.96σ from 0 (2.39σ for C10, which judges three comparators at once).
+
+| pair | metric | mean difference | distance from 0 | left better in | on the full corpora |
 |---|---|---|---|---|---|
-| CARE (w/o Resolution) − PromptOnly | F1 | -0.91 [-11.3, 8.4] | [-13.3, 10.1] | 45.8% of splits | +25.25 |
-| CARE (w/o Resolution) − PromptOnly | accuracy | +3.24 [-2.2, 8.4] | [-3.3, 9.5] | 86.9% of splits | +20.90 |
-| CARE (w/o Resolution) − LLMJudge | F1 | -6.00 [-15.9, 2.8] | [-18.0, 4.5] | 10.9% of splits | +18.78 |
-| CARE (w/o Resolution) − LLMJudge | accuracy | -0.84 [-5.8, 4.0] | [-6.9, 5.0] | 37.4% of splits | +12.93 |
-| CARE (w/o Resolution) − NeMo self-check | F1 | -3.79 [-14.6, 6.3] | [-16.7, 8.2] | 25.2% of splits | +15.85 |
-| CARE (w/o Resolution) − NeMo self-check | accuracy | -1.44 [-6.7, 3.6] | [-7.7, 4.7] | 29.3% of splits | +8.16 |
-| CARE − PromptOnly | F1 | -1.85 [-12.2, 7.4] | [-14.2, 9.1] | 38.8% of splits | +24.39 |
-| CARE − PromptOnly | accuracy | +3.06 [-2.2, 8.2] | [-3.4, 9.1] | 85.5% of splits | +21.04 |
-| CARE − LLMJudge | F1 | -6.94 [-16.9, 1.9] | [-18.9, 3.7] | 7.1% of splits | +17.91 |
-| CARE − LLMJudge | accuracy | -1.02 [-6.0, 3.8] | [-6.9, 4.7] | 34.5% of splits | +13.07 |
-| CARE − NeMo self-check | F1 | -4.73 [-15.6, 5.4] | [-17.8, 7.2] | 19.9% of splits | +14.98 |
-| CARE − NeMo self-check | accuracy | -1.62 [-6.7, 3.3] | [-7.8, 4.3] | 26.6% of splits | +8.30 |
-| CARE − CARE (w/o Resolution) | F1 | -0.94 [-2.4, 0.4] | — | 8.9% of splits | -0.86 |
-| CARE − CARE (w/o Resolution) | accuracy | -0.18 [-0.9, 0.5] | — | 24.4% of splits | +0.14 |
+| CARE (w/o Resolution) − PromptOnly | F1 | -0.91 (σ = 5.15) | -0.2σ | 45.8% of splits | +25.25 |
+| CARE (w/o Resolution) − PromptOnly | accuracy | +3.24 (σ = 2.73) | +1.2σ | 86.9% of splits | +20.90 |
+| CARE (w/o Resolution) − LLMJudge | F1 | -6.00 (σ = 4.96) | -1.2σ | 10.9% of splits | +18.78 |
+| CARE (w/o Resolution) − LLMJudge | accuracy | -0.84 (σ = 2.58) | -0.3σ | 37.4% of splits | +12.93 |
+| CARE (w/o Resolution) − NeMo self-check | F1 | -3.79 (σ = 5.45) | -0.7σ | 25.2% of splits | +15.85 |
+| CARE (w/o Resolution) − NeMo self-check | accuracy | -1.44 (σ = 2.67) | -0.5σ | 29.3% of splits | +8.16 |
+| CARE − PromptOnly | F1 | -1.85 (σ = 5.17) | -0.4σ | 38.8% of splits | +24.39 |
+| CARE − PromptOnly | accuracy | +3.06 (σ = 2.69) | +1.1σ | 85.5% of splits | +21.04 |
+| CARE − LLMJudge | F1 | -6.94 (σ = 4.96) | -1.4σ | 7.1% of splits | +17.91 |
+| CARE − LLMJudge | accuracy | -1.02 (σ = 2.54) | -0.4σ | 34.5% of splits | +13.07 |
+| CARE − NeMo self-check | F1 | -4.73 (σ = 5.46) | -0.9σ | 19.9% of splits | +14.98 |
+| CARE − NeMo self-check | accuracy | -1.62 (σ = 2.62) | -0.6σ | 26.6% of splits | +8.30 |
+| CARE − CARE (w/o Resolution) | F1 | -0.94 (σ = 0.72) | -1.3σ | 8.9% of splits | -0.86 |
+| CARE − CARE (w/o Resolution) | accuracy | -0.18 (σ = 0.40) | -0.4σ | 24.4% of splits | +0.14 |
 
 The paper's McNemar test (two-sided, Yates, α = 0.05) on every split:
 
@@ -85,11 +87,11 @@ The paper's McNemar test (two-sided, Yates, α = 0.05) on every split:
 
 ## Upper bounds for any Resolution judge on the released static stack (paper-sized splits)
 
-| bound | commands judged per split | F1 | F1 range | DR | FPR |
-|---|---|---|---|---|---|
-| static only (no judge) | 0.00 | 60.15 | [51.4, 67.9] | 47.04 | 6.07 |
-| perfect judge on the escalated commands | 23.13 | 61.36 | [52.5, 69.1] | 47.04 | 4.00 |
-| perfect judge on every WARN command | 88.00 | 63.43 | [54.4, 71.3] | 47.04 | 0.66 |
+| bound | commands judged per split | F1 | DR | FPR |
+|---|---|---|---|---|
+| static only (no judge) | 0.00 | 60.15 (σ = 4.25) | 47.04 | 6.07 |
+| perfect judge on the escalated commands | 23.13 | 61.36 (σ = 4.28) | 47.04 | 4.00 |
+| perfect judge on every WARN command | 88.00 | 63.43 (σ = 4.32) | 47.04 | 0.66 |
 
 ## Label sensitivity of the Resolution claims (C7, C9; full corpora)
 

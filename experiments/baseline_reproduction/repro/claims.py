@@ -1,12 +1,13 @@
 """Claim verdicts C1-C11 (PROTOCOL.md §7).
 
-Every claim is one function that returns (outcome, rationale).  The rules:
+Every claim is one function that returns (outcome, rationale).  Distances are measured in sigma,
+the standard deviation of a statistic over the paper-sized splits.  The rules:
 
   * numeric claims (C1-C5 on F1, C8): *not supported (on this reconstruction)* if the reported value
-    lies outside the range of the paper-sized splits, else *inconclusive (not contradicted)*:
-    a value inside the range is not evidence of equivalence, and the populations differ;
-  * directional claims (C6, C10): judged only on whether the range of the paired difference over
-    the paper-sized splits excludes 0; C10's ranges are simultaneous over the three comparators;
+    is more than 1.96 sigma from the mean, else *inconclusive (not contradicted)*: a value within
+    that distance is not evidence of equivalence, and the populations differ;
+  * directional claims (C6, C10): judged only on whether the mean paired difference is more than
+    1.96 sigma from 0; C10 uses 2.39 sigma, which holds for the three comparators at once;
   * Resolution claims (C7, C9): judged on the full corpora, under corpus-level and under audited
     labels; *inconclusive (label-sensitive)* when the two disagree.
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from . import stats as S
 from .analysis import CARE_VARIANTS, COMPARATORS, CORPORA, FULL, SPLITS, STATIC
 
 SUPPORTED, INCONCLUSIVE = "supported", "inconclusive"
@@ -51,11 +53,12 @@ def verdicts(comparison, differences, label_sens, metrics, cfg):
 
 
 def table_ii_f1(condition, comparison):
-    """C1-C5: is the reported F1 outside the range of the paper-sized splits?"""
+    """C1-C5: is the reported F1 more than 1.96 sigma from the mean of the paper-sized splits?"""
     x = comparison.set_index(["condition", "metric"]).loc[(condition, "F1")]
-    why = (f"reported F1 {x.reported:.2f}; paper-sized splits: mean {x.observed:.2f}, range "
-           f"[{x.range_lo:.1f}, {x.range_hi:.1f}], maximum {x.split_max:.2f}; full corpora {x.full_corpora:.2f}")
-    return (NOT_CONTRADICTED if x.inside_range else NOT_SUPPORTED), why
+    why = (f"reported F1 {x.reported:.2f}; paper-sized splits: mean {x.observed:.2f}, σ = {x.sigma:.2f}, so the "
+           f"reported value is {S.in_sigmas(x.sigmas_from_mean)} from the mean; best split {x.split_max:.2f}; "
+           f"full corpora {x.full_corpora:.2f}")
+    return (NOT_CONTRADICTED if x.within_threshold else NOT_SUPPORTED), why
 
 
 def beats_llm_judges(differences):
@@ -64,8 +67,10 @@ def beats_llm_judges(differences):
     per_pair, parts = [], []
     for other in ("PromptOnly", "LLMJudge"):
         x = d.loc[(STATIC, other, "delta_accuracy")]
-        per_pair.append(SUPPORTED if x.lo > 0 else NOT_SUPPORTED if x.hi < 0 else INCONCLUSIVE)
-        parts.append(f"vs {other}: accuracy {x.value:+.2f} pp, range [{x.lo:.1f}, {x.hi:.1f}] (paper {x.paper_delta:+.2f} pp); "
+        per_pair.append(SUPPORTED if x.sigmas_from_zero > x.threshold else
+                        NOT_SUPPORTED if x.sigmas_from_zero < -x.threshold else INCONCLUSIVE)
+        parts.append(f"vs {other}: accuracy {x.value:+.2f} pp, σ = {x.sigma:.2f} ({S.in_sigmas(x.sigmas_from_zero)} from 0; "
+                     f"paper {x.paper_delta:+.2f} pp); "
                      f"the paper's McNemar test favours CARE in {100 * x.mcnemar_favours_left:.0f}% of splits "
                      f"and {other} in {100 * x.mcnemar_favours_right:.0f}%")
     outcome = (SUPPORTED if all(v == SUPPORTED for v in per_pair) else
@@ -86,15 +91,17 @@ def resolution_lowers_fpr(label_sens):
 
 
 def escalation_rate_matches(metrics, cfg):
-    """C8: is the reported escalation rate outside the range of the paper-sized splits?"""
+    """C8: is the reported escalation rate more than 1.96 sigma from the mean of the paper-sized splits?"""
     p = cfg["reported"]["resolution_funnel"]
     reported = 100 * p["escalated"] / p["n"]
     m = metrics[(metrics.condition == FULL) & (metrics.run == cfg["analysis"]["primary_run"])
                 & (metrics.metric == "llm_call_rate")].set_index("scope")
     x = m.loc[SPLITS]
-    why = (f"reported {reported:.2f}%; paper-sized splits: mean {x.value:.2f}%, range [{x.lo:.1f}, {x.hi:.1f}]; "
-           f"full corpora {m.loc[CORPORA].value:.2f}%")
-    return (NOT_CONTRADICTED if x.lo <= reported <= x.hi else NOT_SUPPORTED), why
+    distance = S.sigmas_between(reported, x.value, x.sd)
+    why = (f"reported {reported:.2f}%; paper-sized splits: mean {x.value:.2f}%, σ = {x.sd:.2f} "
+           f"({S.in_sigmas(distance)} from the mean); full corpora {m.loc[CORPORA].value:.2f}%")
+    within = abs(distance) <= S.sigma_threshold(cfg["paper_sized_splits"]["level"])
+    return (NOT_CONTRADICTED if within else NOT_SUPPORTED), why
 
 
 def judge_never_allows_dangerous(label_sens):
@@ -111,18 +118,18 @@ def judge_never_allows_dangerous(label_sens):
 def highest_f1(differences):
     """C10: does a CARE variant beat every comparator in F1, or is every variant beaten by one?
 
-    Uses ranges that are simultaneous over the three comparators (Bonferroni), because the
-    strongest comparator is only known after the results.
+    Uses the threshold that holds for the three comparators at once (2.39 sigma, Bonferroni),
+    because the strongest comparator is only known after the results.
     """
     d = differences[(differences.metric == "delta_F1") & differences.right.isin(COMPARATORS)]
     by_variant = {c: d[d.left == c] for c in CARE_VARIANTS if (d.left == c).any()}
-    wins = any((g.adj_lo > 0).all() for g in by_variant.values())
-    beaten = bool(by_variant) and all((g.adj_hi < 0).any() for g in by_variant.values())
+    wins = any((g.sigmas_from_zero > g.threshold_simultaneous).all() for g in by_variant.values())
+    beaten = bool(by_variant) and all((g.sigmas_from_zero < -g.threshold_simultaneous).any() for g in by_variant.values())
     closest = d.loc[d.groupby("left").value.idxmin()]
-    why = "; ".join(f"{r.left} - {r.right}: F1 {r.value:+.2f} pp, simultaneous range [{r.adj_lo:.1f}, {r.adj_hi:.1f}]"
+    why = "; ".join(f"{r.left} - {r.right}: F1 {r.value:+.2f} pp, σ = {r.sigma:.2f} ({S.in_sigmas(r.sigmas_from_zero)} from 0)"
                     for r in closest.itertuples())
     return (SUPPORTED if wins else NOT_SUPPORTED if beaten else INCONCLUSIVE,
-            why + "; coverage: 6 of the paper's 12 rows")
+            why + f"; separated only beyond {closest.threshold_simultaneous.iloc[0]:.2f}σ; coverage: 6 of the paper's 12 rows")
 
 
 def latency(comparison):

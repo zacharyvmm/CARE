@@ -75,8 +75,11 @@ def test_split_counts_and_rates_equal_point_metrics_on_each_split():
         assert r["acc"][i] == pytest.approx((m["tp"] + m["tn"]) / 20)
 
 
-def test_central_range_holds_the_central_share():
-    assert S.central_range(np.arange(101), 0.9) == pytest.approx((5, 95))
+def test_sigma_threshold_and_distance():
+    assert S.sigma_threshold(0.95) == pytest.approx(1.96, abs=0.001)
+    assert S.sigma_threshold(0.95, comparisons=3) == pytest.approx(2.394, abs=0.001)     # Bonferroni over 3
+    assert S.sigmas_between(70, 60, 4) == pytest.approx(2.5) and S.sigmas_between(50, 60, 4) == pytest.approx(-2.5)
+    assert S.sigmas_between(0, 0, 0) == 0 and S.sigmas_between(1, 0, 0) == np.inf       # NoGuard: no spread
 
 
 # ---------------------------------------------------------------- response parsing (App. E)
@@ -292,12 +295,13 @@ def test_corpus_metrics_count_only_the_primary_population():
     assert m.loc[(care, "ART", "DR"), "value"] == 100 and m.loc[(care, "RedCode-Exec", "DR"), "value"] == 50
 
 
-def test_split_metrics_are_the_mean_and_range_over_splits():
+def test_split_metrics_are_the_mean_and_sigma_over_splits():
     o = _toy()
     splits = np.array([[0, 1, 4, 5], [2, 3, 4, 5], [0, 3, 5, 7]])
-    m = A.split_metrics(o, splits, 0.95).set_index(["condition", "metric"])
+    m = A.split_metrics(o, splits).set_index(["condition", "metric"])
     dr = m.loc[("CARE (w/o Resolution)", "DR")]
     assert dr.value == pytest.approx(100 * (1 + 0.5 + 0.5) / 3) and (dr["min"], dr["max"], dr.n) == (50, 100, 3)
+    assert dr.sd == pytest.approx(np.std([100, 50, 50]))
 
 
 def test_paired_differences_report_left_minus_right():
@@ -305,42 +309,47 @@ def test_paired_differences_report_left_minus_right():
     d = A.paired_differences(o, np.array([[0, 1, 2, 3, 4, 5, 7]]), cfg).set_index(["left", "right", "metric"])
     x = d.loc[("CARE (w/o Resolution)", "LLMJudge", "delta_accuracy")]
     assert x.value == pytest.approx(100 * (6 - 3) / 7) and (x.left_only, x.right_only) == (3, 0)
+    assert x.threshold == pytest.approx(1.96, abs=0.001) and x.threshold_simultaneous == pytest.approx(2.394, abs=0.001)
     assert x.paper_delta == pytest.approx(100 * (70 - 20) / 549)
 
 
 # ---------------------------------------------------------------- verdict rules
-def _comparison(reported, lo, hi):
-    return pd.DataFrame([dict(condition="CARE", metric="F1", reported=reported, observed=(lo + hi) / 2, range_lo=lo,
-                              range_hi=hi, split_max=hi + 1, full_corpora=30.0, inside_range=lo <= reported <= hi)])
+def _comparison(reported, mean, sigma):
+    distance = S.sigmas_between(reported, mean, sigma)
+    return pd.DataFrame([dict(condition="CARE", metric="F1", reported=reported, observed=mean, sigma=sigma,
+                              sigmas_from_mean=distance, within_threshold=abs(distance) <= 1.96, split_max=mean + 3 * sigma,
+                              full_corpora=30.0)])
 
 
-def test_numeric_claim_is_judged_on_the_range_of_paper_sized_splits():
-    assert C.table_ii_f1("CARE", _comparison(85.64, 50, 65))[0] == C.NOT_SUPPORTED
-    assert C.table_ii_f1("CARE", _comparison(60.0, 50, 65))[0] == C.NOT_CONTRADICTED
+def test_numeric_claim_is_judged_on_its_distance_from_the_mean_in_sigma():
+    assert C.table_ii_f1("CARE", _comparison(85.64, 60, 4))[0] == C.NOT_SUPPORTED        # 6.4 sigma away
+    assert C.table_ii_f1("CARE", _comparison(67.0, 60, 4))[0] == C.NOT_CONTRADICTED      # 1.75 sigma away
+    assert C.table_ii_f1("CARE", _comparison(52.0, 60, 4))[0] == C.NOT_SUPPORTED         # 2 sigma below
 
 
-def _differences(ranges, metric="delta_F1"):
-    """{(left, right): (lo, hi)} -> a differences table with those (simultaneous) ranges."""
-    return pd.DataFrame([dict(left=left, right=right, metric=metric, value=(lo + hi) / 2, lo=lo, hi=hi, adj_lo=lo, adj_hi=hi,
-                              paper_delta=10.0, mcnemar_favours_left=0.5, mcnemar_favours_right=0.0)
-                         for (left, right), (lo, hi) in ranges.items()])
+def _differences(distances, metric="delta_F1"):
+    """{(left, right): mean difference in sigma} -> a differences table (sigma = 2 pp)."""
+    return pd.DataFrame([dict(left=left, right=right, metric=metric, value=2.0 * z, sigma=2.0, sigmas_from_zero=z,
+                              threshold=1.96, threshold_simultaneous=2.394, paper_delta=10.0,
+                              mcnemar_favours_left=0.5, mcnemar_favours_right=0.0)
+                         for (left, right), z in distances.items()])
 
 
-def test_c6_needs_both_pairs_above_zero():
+def test_c6_needs_both_pairs_more_than_1_96_sigma_above_zero():
     care = "CARE (w/o Resolution)"
-    both = _differences({(care, "PromptOnly"): (1, 9), (care, "LLMJudge"): (2, 8)}, "delta_accuracy")
-    one = _differences({(care, "PromptOnly"): (1, 9), (care, "LLMJudge"): (-2, 8)}, "delta_accuracy")
-    against = _differences({(care, "PromptOnly"): (1, 9), (care, "LLMJudge"): (-9, -1)}, "delta_accuracy")
+    both = _differences({(care, "PromptOnly"): 2.5, (care, "LLMJudge"): 2.0}, "delta_accuracy")
+    one = _differences({(care, "PromptOnly"): 2.5, (care, "LLMJudge"): 1.5}, "delta_accuracy")
+    against = _differences({(care, "PromptOnly"): 2.5, (care, "LLMJudge"): -2.0}, "delta_accuracy")
     assert [C.beats_llm_judges(d)[0] for d in (both, one, against)] == [C.SUPPORTED, C.INCONCLUSIVE, C.NOT_SUPPORTED]
 
 
-def test_c10_is_judged_on_simultaneous_ranges_over_all_comparators():
-    pairs = lambda static, full: _differences({(c, o): r for c, rs in zip(A.CARE_VARIANTS, (static, full))  # noqa: E731
-                                               for o, r in zip(A.COMPARATORS, rs)})
-    wins = pairs([(1, 5)] * 3, [(-5, 5)] * 3)                         # one variant beats every comparator
-    beaten = pairs([(1, 5), (1, 5), (-9, -1)], [(-9, -1), (0, 5), (0, 5)])   # every variant loses to someone
-    open_ = pairs([(1, 5), (1, 5), (-9, 1)], [(-9, -1), (0, 5), (0, 5)])
-    assert [C.highest_f1(d)[0] for d in (wins, beaten, open_)] == [C.SUPPORTED, C.NOT_SUPPORTED, C.INCONCLUSIVE]
+def test_c10_uses_the_threshold_that_holds_for_all_comparators_at_once():
+    pairs = lambda static, full: _differences({(c, o): z for c, zs in zip(A.CARE_VARIANTS, (static, full))  # noqa: E731
+                                               for o, z in zip(A.COMPARATORS, zs)})
+    wins = pairs([2.5, 2.5, 2.5], [0, 0, 0])                 # one variant beats every comparator
+    not_quite = pairs([2.5, 2.5, 2.2], [0, 0, 0])            # 2.2 sigma clears 1.96 but not 2.39
+    beaten = pairs([1, 1, -2.5], [-2.5, 0, 0])               # every variant loses to someone
+    assert [C.highest_f1(d)[0] for d in (wins, not_quite, beaten)] == [C.SUPPORTED, C.INCONCLUSIVE, C.NOT_SUPPORTED]
 
 
 def _label_sensitivity(corpus, audited):
@@ -376,17 +385,15 @@ def test_settings_without_key_reuse_committed_observations():
     assert not P.settings({"llm": {"runs": 3}}, environ={"OPENROUTER_API_KEY": "k", "REPRO_REUSE_LLM": "1"}).run_llm
 
 
-def test_headline_marks_whether_the_reported_value_is_inside_the_range():
-    cmp = pd.DataFrame([
-        dict(condition="CARE", metric="F1", reported=85.64, observed=57.4, range_lo=44.4, range_hi=68.0, inside_range=False),
-        dict(condition="CARE", metric="DR", reported=75.9, observed=42.3, range_lo=30.0, range_hi=55.0, inside_range=False),
-        dict(condition="CARE", metric="FPR", reported=0.9, observed=3.3, range_lo=0.5, range_hi=5.0, inside_range=True),
-        dict(condition="LLMJudge", metric="F1", reported=73.1, observed=70.3, range_lo=63.0, range_hi=76.8, inside_range=True),
-        dict(condition="LLMJudge", metric="DR", reported=67.3, observed=62.3, range_lo=55.0, range_hi=70.0, inside_range=True),
-        dict(condition="LLMJudge", metric="FPR", reported=11.3, observed=10.0, range_lo=6.0, range_hi=14.0, inside_range=True)])
+def test_headline_shows_sigma_and_marks_whether_the_reported_value_is_within_the_threshold():
+    row = lambda c, m, reported, mean, sigma, within: dict(condition=c, metric=m, reported=reported, observed=mean,  # noqa: E731
+                                                           sigma=sigma, within_threshold=within)
+    cmp = pd.DataFrame([row("CARE", "F1", 85.64, 59.2, 4.3, False), row("CARE", "DR", 75.9, 45.6, 4.6, False),
+                        row("CARE", "FPR", 0.9, 5.4, 1.3, False), row("LLMJudge", "F1", 73.1, 70.3, 3.1, True),
+                        row("LLMJudge", "DR", 67.3, 62.3, 3.8, True), row("LLMJudge", "FPR", 11.3, 10.0, 1.9, True)])
     h = R.headline(cmp)
     assert h.condition.tolist() == ["LLMJudge", "CARE"]                  # paper's row order
-    assert h.F1.iloc[1] == "85.64 → **57.40** [44.4, 68.0] ∉" and h.F1.iloc[0].endswith("∈")
+    assert h.F1.iloc[1] == "85.64 → **59.20** (σ = 4.30) ∉" and h.F1.iloc[0].endswith("∈")
 
 
 # ---------------------------------------------------------------- LLM cache identity and reuse (D18, D20)

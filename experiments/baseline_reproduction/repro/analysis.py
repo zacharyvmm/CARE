@@ -7,7 +7,7 @@ Two views of the same decisions (PROTOCOL.md §6):
                          what the paper's own statistics look like on this population
 
     corpus_metrics        F1 / DR / FPR, counts, latency and LLM usage on the full corpora, and per source
-    split_metrics         F1 / DR / FPR / accuracy over the paper-sized splits: mean and range
+    split_metrics         F1 / DR / FPR / accuracy over the paper-sized splits: mean and standard deviation
     compare_with_paper    reported (Table II) vs observed
     paired_differences    CARE vs each comparator on the paper-sized splits (Table VIII, C6, C10)
     resolution_funnel, oracle_bounds, redcode_scenarios, label_sensitivity,
@@ -94,32 +94,31 @@ def _rate(base, scope, metric, k, n):
 
 
 # ------------------------------------------------------------------ paper-sized splits
-def split_metrics(o, splits, level):
+def split_metrics(o, splits):
     """F1, DR, FPR and accuracy of every condition and run over the paper-sized splits.
 
     `value` is the mean over the splits (the expected value of the paper's statistic on this
-    population); `lo`-`hi` holds the central `level` share of the splits.
+    population) and `sd` their standard deviation (how much it varies from split to split).
     """
     rows = []
     for c in o.conditions:
         for run in o.runs(c):
             base = dict(condition=c, run_id=o.frame(c, run).run_id.iloc[0], run=run, scope=SPLITS)
             r = S.rates(S.split_counts(o.y, o.deny(c, run), splits))
-            rows += [_spread(base, name, 100 * r[key], level) for key, name in RATES]
+            rows += [_spread(base, name, 100 * r[key]) for key, name in RATES]
             if c == FULL:
                 escalated = o.frame(c, run).llm_called.to_numpy(bool)[splits].mean(1)
-                rows.append(_spread(base, "llm_call_rate", 100 * escalated, level))
+                rows.append(_spread(base, "llm_call_rate", 100 * escalated))
     return pd.DataFrame(rows)
 
 
 def f1_of_every_split(o, splits, run=1):
-    """F1 (%) of every paper-sized split, per guard: the distribution behind the range."""
+    """F1 (%) of every paper-sized split, per guard: the distribution behind the mean and sigma."""
     return {c: 100 * S.rates(S.split_counts(o.y, o.deny(c, run), splits))["f1"] for c in o.guards}
 
 
-def _spread(base, metric, x, level, unit="%"):
-    lo, hi = S.central_range(x, level)
-    return dict(base, metric=metric, value=float(np.nanmean(x)), unit=unit, lo=lo, hi=hi, sd=float(np.nanstd(x)),
+def _spread(base, metric, x, unit="%"):
+    return dict(base, metric=metric, value=float(np.nanmean(x)), unit=unit, sd=float(np.nanstd(x)),
                 min=float(np.nanmin(x)), max=float(np.nanmax(x)), n=len(x))
 
 
@@ -127,12 +126,14 @@ def _spread(base, metric, x, level, unit="%"):
 def compare_with_paper(metrics, cfg):
     """Table II, reported vs observed, per condition and metric.
 
-    `observed` is the mean over the paper-sized splits (primary run) and `range_lo`-`range_hi`
-    their central range; `full_corpora` is the same metric on every command.  `inside_range`
-    says whether the reported value is one a split of this recipe plausibly yields.  It is
-    descriptive: the populations differ, so every row is marked not directly comparable.
+    `observed` is the mean over the paper-sized splits (primary run) and `sigma` their standard
+    deviation; `full_corpora` is the same metric on every command.  `sigmas_from_mean` is the
+    distance of the reported value from the mean, and `within_threshold` says whether that
+    distance is at most `threshold` (1.96): a value a split of this recipe plausibly yields.  It
+    is descriptive: the populations differ, so every row is marked not directly comparable.
     """
     reported, primary = cfg["reported"]["table_ii"], cfg["analysis"]["primary_run"]
+    threshold = S.sigma_threshold(cfg["paper_sized_splits"]["level"])
     m = metrics.set_index(["scope", "condition", "run", "metric"]).sort_index()
     rows = []
     for c, vals in reported["rows"].items():
@@ -142,13 +143,16 @@ def compare_with_paper(metrics, cfg):
         for key, name in RATES[:3]:
             x, r = m.loc[(SPLITS, c, run, name)], vals[key]
             across_runs = m.loc[(SPLITS, c)].xs(name, level="metric").value
-            inside = bool(x.lo - 1e-9 <= r <= x.hi + 1e-9)
+            distance = S.sigmas_between(r, x.value, x.sd)
+            within = bool(abs(distance) <= threshold)
             rows.append(dict(source=reported["cite"], condition=c, metric=name, unit="%", reported=r,
-                             observed=x.value, range_lo=x.lo, range_hi=x.hi, split_min=x["min"], split_max=x["max"],
-                             inside_range=inside, abs_diff=x.value - r, rel_diff=(x.value - r) / r if r else np.nan,
+                             observed=x.value, sigma=x.sd, sigmas_from_mean=distance, threshold=threshold,
+                             within_threshold=within, split_min=x["min"], split_max=x["max"],
+                             abs_diff=x.value - r, rel_diff=(x.value - r) / r if r else np.nan,
                              run_min=across_runs.min(), run_max=across_runs.max(),
                              full_corpora=m.loc[(CORPORA, c, run, name)].value,
-                             status=f"reported {'inside' if inside else 'outside'} the range of paper-sized splits",
+                             status=f"reported {'within' if within else 'beyond'} {threshold:.2f} sigma of the mean "
+                                    "of the paper-sized splits",
                              comparability=NOT_COMPARABLE))
         rows.append(dict(source=reported["cite"], condition=c, metric="latency_mean", unit="ms",
                          reported=vals["latency_ms"], observed=m.loc[(CORPORA, c, run, "latency_mean")].value,
@@ -159,13 +163,14 @@ def compare_with_paper(metrics, cfg):
 def paired_differences(o, splits, cfg, run=1):
     """CARE vs each comparator on the paper-sized splits: left - right, in percentage points.
 
-    Per pair and metric (F1, accuracy): the mean over splits, the central range, a range that is
-    simultaneous over the three comparators (Bonferroni; used by C10), and the share of splits
-    in which the left guard is better.  Accuracy rows also apply the paper's own test (McNemar
-    with Yates, alpha = 0.05; Table VIII) to every split.
+    Per pair and metric (F1, accuracy): the mean and standard deviation over the splits, and
+    `sigmas_from_zero`, the mean in units of that standard deviation.  Two guards count as
+    separated when it exceeds `threshold` (1.96), or `threshold_simultaneous` (2.39) when all
+    three comparators are judged at once (C10).  Accuracy rows also apply the paper's own test
+    (McNemar with Yates, alpha = 0.05; Table VIII) to every split.
     """
-    level = cfg["paper_sized_splits"]["range_level"]
-    adjusted = 1 - (1 - level) / len(COMPARATORS)
+    level = cfg["paper_sized_splits"]["level"]
+    threshold, simultaneous = S.sigma_threshold(level), S.sigma_threshold(level, len(COMPARATORS))
     paper = {(r["left"], r["right"]): r for r in cfg["reported"]["table_viii"]["rows"]}
     n_paper = cfg["reported"]["resolution_funnel"]["n"]
     counts = {c: S.split_counts(o.y, o.deny(c, run), splits) for c in o.guards}
@@ -183,10 +188,10 @@ def paired_differences(o, splits, cfg, run=1):
         for key, name, on_corpora in [("f1", "F1", corpora[left]["f1"] - corpora[right]["f1"]),
                                       ("acc", "accuracy", accuracy(corpora[left]) - accuracy(corpora[right]))]:
             delta = 100 * (rate[left][key] - rate[right][key])
-            lo, hi = S.central_range(delta, level)
-            adj_lo, adj_hi = S.central_range(delta, adjusted) if right in COMPARATORS else (np.nan, np.nan)
-            row = dict(left=left, right=right, metric=f"delta_{name}", value=float(delta.mean()), lo=lo, hi=hi,
-                       adj_lo=adj_lo, adj_hi=adj_hi, excludes_zero=bool(lo > 0 or hi < 0),
+            mean, sd = float(delta.mean()), float(delta.std())
+            row = dict(left=left, right=right, metric=f"delta_{name}", value=mean, sigma=sd,
+                       sigmas_from_zero=S.sigmas_between(mean, 0.0, sd), threshold=threshold,
+                       threshold_simultaneous=simultaneous if right in COMPARATORS else np.nan,
                        share_left_better=float((delta > 0).mean()), full_corpora=100 * on_corpora)
             if key == "acc":
                 row.update(left_only=float(left_only.mean()), right_only=float(right_only.mean()),
@@ -231,7 +236,7 @@ def resolution_funnel(o, splits, cfg):
     return t.assign(escalated_pct=100 * t.escalated / t.n).iloc[np.argsort(paper_first, kind="stable")].reset_index(drop=True)
 
 
-def oracle_bounds(o, splits, level):
+def oracle_bounds(o, splits):
     """Upper bounds on CARE's F1 for ANY Resolution judge, given the released static stack.
 
     The judge's decisions are replaced by the label: on the commands the code escalates, then on
@@ -244,9 +249,8 @@ def oracle_bounds(o, splits, level):
                          ("perfect judge on the escalated commands", escalated),
                          ("perfect judge on every WARN command", warn)]:
         r = S.rates(S.split_counts(o.y, np.where(judged, o.y, static), splits))
-        lo, hi = S.central_range(100 * r["f1"], level)
-        rows.append(dict(bound=name, judged_per_split=float(judged[splits].sum(1).mean()),
-                         f1=100 * r["f1"].mean(), f1_lo=lo, f1_hi=hi, dr=100 * r["dr"].mean(), fpr=100 * r["fpr"].mean()))
+        rows.append(dict(bound=name, judged_per_split=float(judged[splits].sum(1).mean()), f1=100 * r["f1"].mean(),
+                         f1_sigma=100 * r["f1"].std(), dr=100 * r["dr"].mean(), fpr=100 * r["fpr"].mean()))
     return pd.DataFrame(rows)
 
 

@@ -13,7 +13,7 @@ are covered.
 | | |
 |---|---|
 | **Start here** | [`baseline_reproduction.ipynb`](baseline_reproduction.ipynb): the executed notebook, one pipeline stage per section |
-| **Protocol** | [`PROTOCOL.md`](PROTOCOL.md) v2.0, frozen before the run |
+| **Protocol** | [`PROTOCOL.md`](PROTOCOL.md) v2.1. v2.0 was frozen before the run; v2.1 only reports the spread as σ |
 | **Decisions** | [`DECISIONS.md`](DECISIONS.md), append-only |
 | **All tables** | [`results/report.md`](results/report.md) |
 
@@ -41,24 +41,25 @@ The results are read in two ways:
   are exact counts.
 * **Paper-sized splits.** The paper reports statistics of one 549-command split. To compare
   like with like, the paper's composition (Table I) is re-drawn from the corpora 10,000 times
-  and each statistic is computed on every split. We report the mean and the **range** that
-  holds the central 95% of the splits. The range is not a confidence interval: it shows how
-  much a statistic varies from split to split on this population.
+  and each statistic is computed on every split. We report the mean and the standard
+  deviation over the splits, **σ**. σ is not a standard error: it shows how much a statistic
+  varies from split to split on this population. A reported value more than 1.96σ from the
+  mean is one that no plausible split yields.
 
 ## Results
 
 ### Reported vs observed on paper-sized splits (primary run)
 
-Each cell reads *reported → observed mean [range]*. ∈ / ∉: the reported value lies inside /
-outside the range.
+Each cell reads *reported → observed mean (σ)*. ∈ / ∉: the reported value is within / beyond
+1.96σ of the mean.
 
 | Guard | F1 | DR | FPR |
 |---|---|---|---|
-| PromptOnly | 66.99 → **61.06** [54.7, 67.0] ∈ | 63.18 → 55.08 [47.3, 62.7] ∉ | 17.02 → 16.86 [12.8, 21.0] ∈ |
-| LLMJudge | 73.09 → **66.15** [59.9, 71.9] ∉ | 67.27 → 58.69 [50.9, 65.9] ∉ | 11.25 → 12.46 [8.8, 16.1] ∈ |
-| NeMo self-check (emulated) | 68.63 → **63.94** [56.8, 70.6] ∈ | 58.18 → 51.99 [44.1, 60.0] ∈ | 7.60 → 6.98 [4.3, 9.7] ∈ |
-| CARE (w/o Resolution) | 84.99 → **60.15** [51.4, 67.9] ∉ | 75.91 → 47.04 [37.7, 55.9] ∉ | 1.82 → 6.07 [3.6, 8.8] ∉ |
-| CARE | 85.64 → **59.21** [50.3, 67.0] ∉ | 75.91 → 45.58 [36.4, 54.1] ∉ | 0.91 → 5.39 [3.0, 7.9] ∉ |
+| PromptOnly | 66.99 → **61.06** (σ = 3.17) ∈ | 63.18 → 55.08 (σ = 3.89) ∉ | 17.02 → 16.86 (σ = 2.13) ∈ |
+| LLMJudge | 73.09 → **66.15** (σ = 3.07) ∉ | 67.27 → 58.69 (σ = 3.81) ∉ | 11.25 → 12.46 (σ = 1.88) ∈ |
+| NeMo self-check (emulated) | 68.63 → **63.94** (σ = 3.54) ∈ | 58.18 → 51.99 (σ = 4.10) ∈ | 7.60 → 6.98 (σ = 1.41) ∈ |
+| CARE (w/o Resolution) | 84.99 → **60.15** (σ = 4.25) ∉ | 75.91 → 47.04 (σ = 4.64) ∉ | 1.82 → 6.07 (σ = 1.35) ∉ |
+| CARE | 85.64 → **59.21** (σ = 4.30) ∉ | 75.91 → 45.58 (σ = 4.60) ∉ | 0.91 → 5.39 (σ = 1.27) ∉ |
 
 ![Reported vs observed](results/figures/reported_vs_observed.png)
 
@@ -81,31 +82,31 @@ because only 9% of the full corpora is DANGEROUS, against 40% of the paper's spl
 
 | Claim | Verdict | Evidence |
 |---|---|---|
-| C1 CARE (w/o Resolution): F1 84.99 | **not supported** (on this reconstruction) | mean 60.15, range [51.4, 67.9]; the best of 10,000 splits reaches 75.27 |
-| C2 CARE: F1 85.64 | **not supported** (on this reconstruction) | mean 59.21, range [50.3, 67.0]; best split 74.46 |
-| C3 PromptOnly: F1 66.99 | inconclusive (not contradicted) | mean 61.06, range [54.7, 67.0]; the reported value sits at the upper edge |
-| C4 LLMJudge: F1 73.09 | **not supported** (on this reconstruction) | mean 66.15, range [59.9, 71.9] |
-| C5 NeMo self-check: F1 68.63 | inconclusive (not contradicted) | mean 63.94, range [56.8, 70.6] |
-| C6 CARE (w/o Resolution) significantly outperforms PromptOnly and LLMJudge | inconclusive | accuracy difference +3.2 pp [−2.2, 8.4] vs PromptOnly and −0.8 pp [−5.8, 4.0] vs LLMJudge (paper: +14.2 and +9.1) |
+| C1 CARE (w/o Resolution): F1 84.99 | **not supported** (on this reconstruction) | mean 60.15, σ = 4.25: the reported value is 5.8σ above; the best of 10,000 splits reaches 75.27 |
+| C2 CARE: F1 85.64 | **not supported** (on this reconstruction) | mean 59.21, σ = 4.30: 6.2σ above; best split 74.46 |
+| C3 PromptOnly: F1 66.99 | inconclusive (not contradicted) | mean 61.06, σ = 3.17: 1.9σ above, just under the 1.96σ threshold |
+| C4 LLMJudge: F1 73.09 | **not supported** (on this reconstruction) | mean 66.15, σ = 3.07: 2.3σ above |
+| C5 NeMo self-check: F1 68.63 | inconclusive (not contradicted) | mean 63.94, σ = 3.54: 1.3σ above |
+| C6 CARE (w/o Resolution) significantly outperforms PromptOnly and LLMJudge | inconclusive | accuracy difference +3.2 pp (σ = 2.7) vs PromptOnly and −0.8 pp (σ = 2.6) vs LLMJudge, both within 1.96σ of 0 (paper: +14.2 and +9.1) |
 | C7 Resolution lowers FPR at unchanged DR | inconclusive (label-sensitive) | corpus labels: FPR −0.38 pp, DR −2.27 pp. Audited labels: FPR −0.60 pp, DR unchanged |
-| C8 About 4.2% of commands reach the LLM | inconclusive (not contradicted) | 4.21% [2.4, 6.2] on paper-sized splits; 1.93% on the full corpora |
+| C8 About 4.2% of commands reach the LLM | inconclusive (not contradicted) | 4.21% (σ = 1.01) on paper-sized splits; 1.93% on the full corpora |
 | C9 The judge never allows a DANGEROUS command | inconclusive (label-sensitive) | the judge allows 23 DANGEROUS-labelled commands; all 23 only print output and are audited SAFE |
-| C10 CARE has the highest F1 | inconclusive | LLMJudge is ahead of CARE by 6.9 pp on average, but the simultaneous range [−18.9, 3.7] includes 0 |
+| C10 CARE has the highest F1 | inconclusive | LLMJudge is ahead of CARE by 6.9 pp on average (σ = 5.0), which is 1.4σ from 0; three comparators at once need 2.39σ |
 | C11 Latency 0.34 ms / 2.32 ms | inconclusive | hardware and serving differ |
 
 ## What the evidence shows, and what it does not
 
 **Shows, on this reconstruction:**
 
-* **CARE's reported F1 is not reached.** Not one of 10,000 paper-sized splits comes within
-  9 points of it. The misses are static: CARE allows half of the ART commands and 58% of the
+* **CARE's reported F1 is not reached.** It is about 6σ above the mean, and not one of 10,000
+  paper-sized splits comes within 9 points of it. The misses are static: CARE allows half of the ART commands and 58% of the
   RedCode-Exec scripts outright.
 * **A better judge would not close the gap.** A *perfect* Resolution judge on every WARN
   command would raise CARE's F1 from 60.2 to 63.4.
 * **The LLM-judge baselines also fall short of the paper**, by 5 to 7 F1 points, mostly in
-  detection rate. LLMJudge's reported F1 lies outside its range.
+  detection rate. LLMJudge's reported F1 is 2.3σ above its mean.
 * **At the paper's composition, CARE and the LLM judges are not separated.** No paired
-  difference in F1 or accuracy excludes zero.
+  difference in F1 or accuracy is more than 1.4σ from zero.
 * **CARE's advantage is its false-positive rate.** On the full corpora it wrongly blocks 3.6%
   of the safe commands, against 12.7–27.2% for the LLM judges. Where safe commands dominate,
   that makes CARE the most accurate of the five guards.
@@ -185,18 +186,19 @@ Details are in `PROTOCOL.md` §12.
 > a statistic of a 549-command split with a 40% DANGEROUS share, we re-drew the paper's
 > composition (149 ART, 71 RedCode-Exec, 299 head-stratified NL2Bash, 30 developer commands)
 > from the corpora 10,000 times, drawing whole template families, and computed each of the
-> paper's statistics on every split. We report the mean and the central 95% range over splits.
-> A reported value was judged not supported on our reconstruction when it lay outside that
-> range; directional claims were judged on whether the range of the paired difference excluded
-> zero, with simultaneous ranges when the comparator was selected after the fact. Because the
-> population differs from the authors', all comparisons with reported values are descriptive.
+> paper's statistics on every split. We report the mean and the standard deviation σ over the
+> splits. A reported value was judged not supported on our reconstruction when it lay more
+> than 1.96σ from the mean; directional claims were judged on whether the mean paired
+> difference lay more than 1.96σ from zero (2.39σ when the comparator was selected after the
+> fact, a Bonferroni adjustment over three comparators). Because the population differs from
+> the authors', all comparisons with reported values are descriptive.
 
 ## Layout
 
 | Path | Content |
 |---|---|
 | `baseline_reproduction.ipynb` | the executable narrative, executed against the committed observations |
-| `PROTOCOL.md`, `DECISIONS.md`, `config.yaml` | protocol v2.0, the append-only decision log, the configuration (pins, fingerprints, reported values) |
+| `PROTOCOL.md`, `DECISIONS.md`, `config.yaml` | protocol v2.1, the append-only decision log, the configuration (pins, fingerprints, reported values) |
 | `repro/` | `pipeline` (one function per notebook stage; start here), `sources` (pinned fetch), `dataset` (population, split recipe), `guards` (CARE, baselines, LLM client and cache), `stats` (formulas), `analysis` (tables), `claims` (verdicts), `report` (figures, views) |
 | `tests/test_repro.py` | 62 unit tests; the notebook also runs CARE's own 10 |
 | `data/population.parquet` | the 11,665 evaluated commands (licenses in `data/NOTICE.md`) |
@@ -213,6 +215,7 @@ Details are in `PROTOCOL.md` §12.
 
 Protocol v1 evaluated a single 549-command sample of the corpora and went through three rounds
 of external review. Protocol v2.0 replaces the sample with the full corpora; it reaches the
-same conclusion for CARE with much narrower ranges, and it finds the LLM-judge baselines
-further from the paper than the single sample suggested. Everything from v1 is kept in
+same conclusion for CARE with much less uncertainty, and it finds the LLM-judge baselines
+further from the paper than the single sample suggested. Protocol v2.1 reports the
+split-to-split spread as σ instead of a percentile range; no verdict changed. Everything from v1 is kept in
 [`archive/v1/`](archive/v1/README.md).
