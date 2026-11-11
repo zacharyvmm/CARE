@@ -34,14 +34,12 @@ def test_f1_zero_when_no_true_positive():
 @pytest.mark.parametrize("a_only,b_only", [(102, 24), (70, 20), (3, 0), (5, 5), (0, 0)])
 def test_mcnemar_matches_statsmodels(a_only, b_only):
     from statsmodels.stats.contingency_tables import mcnemar
-    a = np.array([True] * a_only + [False] * b_only + [True] * 10)
-    b = np.array([False] * a_only + [True] * b_only + [True] * 10)
-    lo, ro, p_yates, p_exact = stats.mcnemar(a, b)
-    assert (lo, ro) == (a_only, b_only)
+    p_yates = float(stats.mcnemar_p_yates(a_only, b_only))
     if a_only + b_only:
         table = [[10, a_only], [b_only, 0]]
         assert p_yates == pytest.approx(mcnemar(table, exact=False, correction=True).pvalue)
-        assert p_exact == pytest.approx(mcnemar(table, exact=True).pvalue)
+    else:
+        assert p_yates == 1.0      # nothing is discordant
 
 
 def test_paper_table_viii_p_value_reproduces_from_counts():
@@ -52,7 +50,7 @@ def test_paper_table_viii_p_value_reproduces_from_counts():
 def test_mcnemar_p_yates_is_vectorised():
     p = stats.mcnemar_p_yates(np.array([102, 0, 3]), np.array([24, 0, 0]))
     assert p[0] == pytest.approx(float(stats.mcnemar_p_yates(102, 24))) and p[1] == 1.0
-    assert p[2] == pytest.approx(stats.mcnemar([True] * 3, [False] * 3)[2])
+    assert p[2] == pytest.approx(float(stats.mcnemar_p_yates(3, 0)))
 
 
 def test_split_counts_and_rates_equal_point_metrics_on_each_split():
@@ -256,13 +254,6 @@ def test_paper_sized_splits_have_the_papers_composition(population, recipe):
         assert s[s.source == "RedCode-Exec"].family.value_counts().agg(["min", "max"]).tolist() == [3, 4]
     assert not np.array_equal(splits[0], splits[1])
     assert np.array_equal(splits, Splits(range(5), recipe.draw(range(5))).rows)      # seeded
-
-
-def test_seed_42_regenerates_the_archived_v1_split(population, recipe):
-    """The recipe is unchanged from v1 (D25): its seed-42 draw is the split v1 evaluated."""
-    v1 = pd.read_parquet(os.path.join(EXPERIMENT, "archive/v1/main_split.parquet"))
-    rows = Splits(range(42, 43), recipe[0].draw([42])).rows[0]
-    assert sorted(population.command_id.iloc[rows]) == sorted(v1.command_id)
 
 
 def test_only_eligible_commands_are_drawn(population):

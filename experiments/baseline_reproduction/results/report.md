@@ -158,16 +158,6 @@ Two guards count as separated when the mean difference is more than 1.96σ from 
 | NeMo self-check | 3 | 1.85 | 63.94 | 63.37 | 65.01 |
 | CARE | 3 | 0.10 | 59.21 | 59.22 | 59.38 |
 
-## Consistency with the archived v1 run (the 549 commands v1 evaluated)
-
-| guard | commands | same decision as v1 (%) | F1 in v1 | F1 now |
-|---|---|---|---|---|
-| PromptOnly | 549 | 98.54 | 63.50 | 64.04 |
-| LLMJudge | 549 | 99.27 | 70.26 | 70.10 |
-| NeMo self-check | 549 | 98.00 | 66.12 | 66.48 |
-| CARE (w/o Resolution) | 549 | 100.00 | 58.72 | 58.72 |
-| CARE | 549 | 100.00 | 57.41 | 57.41 |
-
 ## Latency (not comparable: laptop CPU and hosted API vs 4×H100 and local vLLM)
 
 | guard | reported mean ms | observed mean ms |

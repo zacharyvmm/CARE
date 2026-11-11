@@ -259,11 +259,6 @@ class Report:
                       for column in stability.columns if column.startswith("f1_run")})
         return stability.rename(columns=names)
 
-    def consistency_with_v1(self):
-        return self.analysis.consistency_with_v1.rename(columns={
-            "condition": "guard", "same_decision_pct": "same decision as v1 (%)",
-            "f1_v1": "F1 in v1", "f1_now": "F1 now"})
-
     def latency(self):
         comparison = self.analysis.comparison
         latency = comparison[comparison.metric == "latency_mean"][["condition", "reported", "observed"]]
@@ -322,7 +317,6 @@ class Report:
                 float_format=".0f")
         section("Construction variants: expected F1 on paper-sized splits", self.construction_variants())
         section("Run-to-run stability of the LLM guards", self.run_stability())
-        section("Consistency with the archived v1 run (the 549 commands v1 evaluated)", self.consistency_with_v1())
         section("Latency (not comparable: laptop CPU and hosted API vs 4×H100 and local vLLM)", self.latency())
         if self.llm_usage():
             parts.append(f"\n{self.llm_usage()}")

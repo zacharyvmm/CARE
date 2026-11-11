@@ -110,9 +110,7 @@ because only 9% of the full corpora is DANGEROUS, against 40% of the paper's spl
 * **CARE's advantage is its false-positive rate.** On the full corpora it wrongly blocks 3.6%
   of the safe commands, against 12.7–27.2% for the LLM judges. Where safe commands dominate,
   that makes CARE the most accurate of the five guards.
-* **The result is stable.** The three LLM runs differ on 0.1–3.3% of the decisions, and on
-  the 549 commands that protocol v1 evaluated in a separate run, 98.0–100% of the decisions
-  are the same.
+* **The result is stable.** The three LLM runs differ on 0.1–3.3% of the decisions.
 
 **Does not show:**
 
@@ -203,16 +201,15 @@ Details are in `PROTOCOL.md` §12.
 | `baseline_reproduction.ipynb` | the executable narrative, executed against the committed observations |
 | `PROTOCOL.md`, `DECISIONS.md`, `config.yaml` | protocol v2.1, the append-only decision log, the configuration (pins, fingerprints, reported values) |
 | `repro/` | the code the notebook calls, one module per step: `configuration`, `sources` (pinned fetch), `corpora` (the population), `guards` (CARE, baselines, LLM client), `evaluation` (run the guards, or reuse verified replies), `paper_sized_splits` (the split recipe), `stats` (formulas), `analysis` (`Analysis`: every table), `claims` (verdict rules), `report` (`Report`: tables and figures), `provenance` (`RunRecord`: checks and exported files) |
-| `tests/test_repro.py` | 62 unit tests; the notebook also runs CARE's own 10 |
+| `tests/test_repro.py` | 61 unit tests; the notebook also runs CARE's own 10 |
 | `data/population.parquet` | the 11,665 evaluated commands (licenses in `data/NOTICE.md`) |
 | `data/label_audit.yaml` | the audited labels of the 23 commands behind C7 and C9 (sensitivity analysis only) |
 | `results/observations.parquet` | 163,310 rows, one per guard, run and command: decision, latency, raw LLM reply, provider, generation id, timestamp, tokens, cost, CARE's trace |
 | `results/metrics.parquet`, `comparison.parquet`, `claims.parquet` | every metric on the full corpora and on the paper-sized splits; reported vs observed; verdicts |
-| `results/*.parquet` (others) | paired differences, Resolution funnel, oracle bounds, label sensitivity, RedCode scenarios, construction variants, run stability, consistency with v1 |
+| `results/*.parquet` (others) | paired differences, Resolution funnel, oracle bounds, label sensitivity, RedCode scenarios, construction variants, run stability |
 | `results/provenance.json`, `validation.json`, `llm_request_identity.json` | sources, fingerprints, environment, LLM usage, output checksums; pass/fail checks; the executed request identity that gates reuse |
-| `results/executed/` | the notebook of the live confirmatory run, as executed, with its provenance |
-| `archive/v1/` | the superseded first version, which evaluated one 549-command sample |
-| `environment/requirements.lock.txt` | exact package versions (Python 3.12) |
+| `results/executed/` | the provenance and validation records of the live confirmatory run, and of the clean-clone validation |
+| `environment/requirements.lock.txt`, `requirements.txt` | exact package versions (Python 3.12); the direct dependencies |
 
 ## History
 
@@ -220,5 +217,7 @@ Protocol v1 evaluated a single 549-command sample of the corpora and went throug
 of external review. Protocol v2.0 replaces the sample with the full corpora; it reaches the
 same conclusion for CARE with much less uncertainty, and it finds the LLM-judge baselines
 further from the paper than the single sample suggested. Protocol v2.1 reports the
-split-to-split spread as σ instead of a percentile range; no verdict changed. Everything from v1 is kept in
-[`archive/v1/`](archive/v1/README.md).
+split-to-split spread as σ instead of a percentile range; no verdict changed.
+
+The files of protocol v1 are no longer part of the artifact. They are in git history: check out
+commit `57ac042` and look in `experiments/baseline_reproduction/archive/v1/`.

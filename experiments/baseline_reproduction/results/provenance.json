@@ -1,9 +1,9 @@
 {
-  "generated_utc": "2026-11-11T20:51:38.644570+00:00",
+  "generated_utc": "2026-11-11T20:57:03.724341+00:00",
   "mode": "full",
   "run_label": "confirmatory-v2",
   "protocol_version": "2.1",
-  "protocol_sha256": "166d8fc7eec20dfd2c860710ea11ca84cce4d0557382463cd94359a6fbfa6f01",
+  "protocol_sha256": "6ff814dcf71bb3ee07c4fd76316acca0626e275900f378f272babcf25752ac32",
   "config_sha256": "8ddaf8da3898a5f39976664bb5ddda10dd188221d784d3bf2a6237405449ed5b",
   "method_under_test": {
     "repository": "https://github.com/prisma-research/CARE (this repo, fork zacharyvmm/CARE)",
@@ -175,10 +175,10 @@
       "matplotlib": "3.11.2"
     },
     "lockfile_mismatches": {},
-    "repo_head": "8e04b36d6dc3c8895cc6a42df3f431907498208f",
+    "repo_head": "57ac042ea507b155238bffc6ec3ead2eea423617",
     "uncommitted_changes": true
   },
-  "unit_tests": "72 passed in 1.35s",
+  "unit_tests": "71 passed in 1.33s",
   "outputs": {
     "results/observations.parquet": "3f498e61061a2f71044db8c43953a94e3560ba8208ea5365e5bc505319a292a6",
     "results/metrics.parquet": "2ec36c3245c8a712e94327155ec9e237b1872cc833ca1e715242f246d3659668",
@@ -190,7 +190,6 @@
     "results/label_sensitivity.parquet": "f0339548580d0d5f43c1e312c2b6967c038208392d715a86c9ab6f611ec70340",
     "results/redcode_scenarios.parquet": "9c3cddbe6d03377b1768141167d3a9ddd16d28f41df93856a1e58ee41ab78865",
     "results/run_stability.parquet": "71c4f0ef003094f4ac41603e71a1e1d78727434be61934832dcf70e2f2a9822f",
-    "results/construction_variants.parquet": "5d7a456a79146ae750e8f5f1c58937e8e0c364fd7becf1728fe8801b8033b252",
-    "results/consistency_with_v1.parquet": "fe98a219db1e7e848da513654c44e172c377ac303dd9c550c518c1632c059862"
+    "results/construction_variants.parquet": "5d7a456a79146ae750e8f5f1c58937e8e0c364fd7becf1728fe8801b8033b252"
   }
 }

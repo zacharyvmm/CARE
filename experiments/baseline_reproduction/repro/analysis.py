@@ -15,18 +15,16 @@ Each table is an attribute, computed the first time it is used:
     analysis.paired_differences      CARE vs each comparator (Table VIII, C6, C10)
     analysis.verdicts                claims C1-C11
     analysis.resolution_funnel, .oracle_bounds, .label_sensitivity, .redcode_scenarios,
-    analysis.construction_variants, .run_stability, .consistency_with_v1      diagnostics
+    analysis.construction_variants, .run_stability                            diagnostics
 """
 from __future__ import annotations
 
-import os
 from functools import cached_property
 
 import numpy as np
 import pandas as pd
 
 from . import claims, corpora, stats
-from .configuration import EXPERIMENT
 from .corpora import FULL_CORPORA, SET_ASIDE
 from .guards import CARE_VARIANTS, COMPARATORS, FULL_CARE, PAPER_ORDER, STATIC_CARE
 from .paper_sized_splits import PAPER_SIZED_SPLITS, SplitRecipe, Splits
@@ -36,7 +34,6 @@ PAIRS.append((FULL_CARE, STATIC_CARE))                                          
 RATES = [("f1", "F1"), ("dr", "DR"), ("fpr", "FPR"), ("acc", "accuracy")]
 NOT_COMPARABLE = ("not directly comparable: reconstructed population (D1-D5, D12, D24), hosted serving (D6), "
                   "NeMo emulation (D7); differences are descriptive")
-V1_OBSERVATIONS = os.path.join(EXPERIMENT, "archive/v1/results/observations.parquet")
 
 
 class Analysis:
@@ -405,29 +402,6 @@ class Analysis:
                                  decisions_that_differ_pct=100 * float(differs.mean()), **f1_per_run))
         return pd.DataFrame(rows)
 
-    @cached_property
-    def consistency_with_v1(self):
-        """This run against the archived v1 run, on the 549 commands v1 evaluated (its run 1).
-
-        The static guards are deterministic, so their decisions must be identical.
-        """
-        v1 = pd.read_parquet(V1_OBSERVATIONS)
-        v1 = v1[v1.rep == 1]
-        row_of = pd.Series(np.arange(len(self.population)), index=self.population.command_id)
-        rows = []
-        for guard in self.evaluated_guards:
-            v1_denied = v1[v1.condition == guard].set_index("command_id").prediction_dangerous
-            if v1_denied.empty or not v1_denied.index.isin(row_of.index).all():
-                continue   # a smoke run does not hold v1's commands
-            at = row_of.loc[v1_denied.index].to_numpy()
-            now_denied, dangerous = self.denied(guard)[at], self.dangerous[at]
-            v1_denied = v1_denied.to_numpy(bool)
-            rows.append(dict(condition=guard, commands=len(at),
-                             same_decision_pct=100 * float((now_denied == v1_denied).mean()),
-                             f1_v1=100 * stats.point_metrics(dangerous, v1_denied)["f1"],
-                             f1_now=100 * stats.point_metrics(dangerous, now_denied)["f1"]))
-        return pd.DataFrame(rows)
-
     # -------------------------------------------------------------- everything, for export
     def tables(self):
         """Every analysis table, by the name of its Parquet file."""
@@ -435,8 +409,7 @@ class Analysis:
             metrics=self.metrics, comparison=self.comparison, paired_differences=self.paired_differences,
             claims=self.verdicts, resolution_funnel=self.resolution_funnel, oracle_bounds=self.oracle_bounds,
             label_sensitivity=self.label_sensitivity, redcode_scenarios=self.redcode_scenarios,
-            run_stability=self.run_stability, construction_variants=self.construction_variants,
-            consistency_with_v1=self.consistency_with_v1)
+            run_stability=self.run_stability, construction_variants=self.construction_variants)
 
 
 def _rate(this, scope, metric, count, total):

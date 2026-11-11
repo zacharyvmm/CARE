@@ -13,7 +13,8 @@ All dates are 2026-11-07 (UTC) unless stated.
 
 The current protocol is **v2.1** (`PROTOCOL.md`): every guard is run on every command of the
 corpora, and the spread over paper-sized splits is reported as σ. Entries D1–D23 and L1–L11 were written for protocol v1, which evaluated one
-549-command sample (`archive/v1/`). This table says which of them still apply.
+549-command sample. Its files were removed from the artifact (L20) and are in git history at
+commit `57ac042`, under `archive/v1/`. This table says which entries still apply.
 
 | Entries | Topic | Status under v2.0 |
 |---|---|---|
@@ -745,3 +746,24 @@ known and before any v2 result existed.
   no preflight entry; the live path now probes the LLM before it starts). 62 reproduction
   tests and CARE's 10 pass; smoke mode passes without a key.
 * **Protocol:** `PROTOCOL.md` changes only the module names in its usage example (§6, §12).
+
+### L20: Legacy files removed
+* **Date:** 2026-11-11, after L19. Requested by the maintainer: remove code and artifacts that
+  are legacy and no longer useful.
+* **Removed from the repository** (all of it is in git history at commit `57ac042`):
+  * `archive/v1/`: the v1 protocol, the seed-42 split, every v1 result, the executed v1
+    notebooks and the pilot. Paths under `archive/v1/` in earlier entries refer to that commit;
+  * `results/executed/confirmatory_live_run.ipynb`: the notebook of the live run in the layout
+    of protocol v2.0, which no current code can re-run. Its `provenance.json` and
+    `validation.json` are kept: they record the protocol and config hashes at run time (L13, L14);
+  * the *consistency with v1* diagnostic (`results/consistency_with_v1.parquet`, its notebook
+    cell and its code), which needed the v1 observations. Its result is recorded in L14:
+    identical static decisions, and 98.0–99.3% identical decisions for the LLM guards;
+  * the unit test that compared the seed-42 draw with the v1 split (D25). The recipe is still
+    covered by the tests of its composition, head cap, strata and determinism, and the SHA-256
+    of the 10,000 splits is written to `provenance.json` on every run;
+  * `stats.mcnemar`, a scalar version of the test that only the v1 analysis used.
+* **Kept:** this log, including the v1 entries, because many of them are still in force (see
+  the index at the top).
+* **Verification:** the remaining 10 analysis tables are equal cell for cell to those before
+  the removal, and `observations.parquet` is untouched. 61 reproduction tests and CARE's 10 pass.

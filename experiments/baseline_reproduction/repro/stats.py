@@ -29,20 +29,6 @@ def point_metrics(dangerous, denied):
                 f1=2 * tp / (2 * tp + fp + fn) if tp else 0.0)
 
 
-def mcnemar(correct_left, correct_right):
-    """Paired McNemar test on per-command correctness, as in the paper's Table VIII.
-
-    Returns (left only correct, right only correct, p with Yates' correction, exact p).
-    """
-    left, right = np.asarray(correct_left, bool), np.asarray(correct_right, bool)
-    left_only, right_only = int((left & ~right).sum()), int((~left & right).sum())
-    discordant = left_only + right_only
-    if discordant == 0:
-        return left_only, right_only, 1.0, 1.0
-    exact = scipy.stats.binomtest(left_only, discordant, 0.5).pvalue
-    return left_only, right_only, float(mcnemar_p_yates(left_only, right_only)), float(exact)
-
-
 def mcnemar_p_yates(left_only, right_only):
     """Two-sided McNemar p-value with Yates' correction; accepts arrays (1 where nothing is discordant)."""
     left_only, right_only = np.asarray(left_only, float), np.asarray(right_only, float)

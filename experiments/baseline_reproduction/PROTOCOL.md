@@ -9,7 +9,7 @@ verdict rules are stated in σ. v2.0 reported the interval holding the central 9
 splits. Both rules were applied to the same decisions and **every verdict is identical**. The
 v2.0 text as frozen is in git at commit `931ebfe`. Changed sections: §6, §7 and §11.
 
-**What changed from v1.** Protocol v1 (v1.0–v1.3, archived in `archive/v1/`) evaluated one
+**What changed from v1.** Protocol v1 (v1.0–v1.3, in git history at commit `57ac042`) evaluated one
 549-command sample of the corpora. Protocol v2.0 evaluates **every command of every corpus**
 (D24). Sampling no longer decides which commands are run, so the bootstrap machinery of v1 is
 gone. The data sources, prompts, model, parsing and metric formulas are unchanged.
@@ -188,7 +188,8 @@ keeps its corpus label.
   * V3: the ART snapshot of 2026-03-24 (static CARE only; the LLM conditions were not run on it).
 * **Run-to-run stability** of the LLM conditions.
 * **Consistency with v1:** on the 549 commands v1 evaluated, static decisions must be
-  identical, and the agreement of the LLM conditions is reported.
+  identical, and the agreement of the LLM conditions is reported. This was checked once
+  (`DECISIONS.md` L14); the v1 files have since been removed from the artifact (L20).
 
 ## 9. Modes and resources
 
@@ -216,7 +217,7 @@ keeps its corpus label.
 
 ## 11. Disclosure: what was known when v2.0 was frozen
 
-* **Known:** all v1 results (archived in `archive/v1/`), including three rounds of external
+* **Known:** all v1 results (in git history at commit `57ac042`), including three rounds of external
   review. The v2 verdict rules are the v1.3 rules with the spread over paper-sized splits in
   place of the bootstrap interval, and C7/C9 evaluated on the full corpora.
 * **Not known:** any v2 result. Before the freeze, the pipeline was exercised only on 40
