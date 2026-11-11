@@ -1,0 +1,98 @@
+# Configuration for the CARE baseline reproduction, protocol v2.1 (PROTOCOL.md).
+# Changing anything here after the confirmatory run requires a DECISIONS.md entry.
+protocol_version: "2.1"   # v2.1 = v2.0 with the spread reported as sigma (DECISIONS D29)
+
+paper:
+  title: "CARE: Pre-Execution Command Verification for Shell-Executing LLM Agents"
+  authors: "Liu, Zhang, Yang, Zhang, Feng, Wang, Qiu, Liu, Poczos, Hong"
+  venue: "IEEE ISSRE 2026 (accepted); arXiv preprint"
+  arxiv: "2607.21642"
+  version: "v2 (2026-08-06); v1 (2026-07-21) has identical text apart from author order/affiliations"
+  pdf_sha256: "fe70b54c72caec9f46866c3b9efbf60435eedead982d009bbc4cc81b9b750099"
+  url: "https://arxiv.org/abs/2607.21642v2"
+
+method_under_test:
+  repository: "https://github.com/prisma-research/CARE (this repo, fork zacharyvmm/CARE)"
+  release_commit: "81dd742"     # care/ must be byte-identical to this commit (checked on every run)
+  patches: []                   # CARE is run unmodified
+
+sources:   # fetched by repro.sources as sparse clones at pinned commits
+  atomic-red-team:
+    url: "https://github.com/redcanaryco/atomic-red-team"
+    commit: "a0e3f9bc69fed2fd711bd1f1aa87a40c33482fe6"    # HEAD on 2026-11-06
+    patterns: ["atomics/T*/T*.yaml", "LICENSE.txt"]
+    license: "MIT"
+    fingerprint: {n_files: 354, sha256: "df381cc2e80ec1a9a75584dbccdd5890b025e5e56bb45cf0f53759be9f478fde"}
+  RedCode:
+    url: "https://github.com/AI-secure/RedCode"
+    commit: "664e4793dc7309f98b8271baed5bbc04d6ef4c39"    # HEAD on 2026-10-19
+    patterns: ["dataset/RedCode-Exec/bash2text_dataset_json/*.json", "dataset/LICENSE", "LICENSE"]
+    license: "dataset CC BY 4.0; code MIT"
+    fingerprint: {n_files: 22, sha256: "9f593605f6175f138d73e77601a4e73e57cc03fee8839a52f9859f8bfef5baed"}
+  nl2bash:
+    url: "https://github.com/TellinaTool/nl2bash"
+    commit: "d6b9f5bdff45621d190134e31ab63b7bf7002190"    # HEAD on 2026-04-18
+    patterns: ["data/bash/all.cm", "data/bash/all.nl", "data/bash/LICENSE"]
+    license: "data/bash MIT (repository code GPL-3.0)"
+    fingerprint: {n_files: 3, sha256: "679ae70ec24f6581bd3734c4b26f9adcf5c1284b2f312ec18b437067d4fa49e3"}
+  atomic-red-team-2026-03-24:   # older ART snapshot, used only by construction variant V3
+    url: "https://github.com/redcanaryco/atomic-red-team"
+    commit: "40a54bf631ced8799676680d78eff30db90abb80"
+    patterns: ["atomics/T*/T*.yaml", "LICENSE.txt"]
+    license: "MIT"
+    fingerprint: {n_files: 329, sha256: "09a324c21fbc405a693742631287bc793670f0a424611b818a8eff3328c52b04"}
+
+population:   # every unique command of the corpora is evaluated (PROTOCOL.md §4)
+  file: "data/population.parquet"
+  real_world_file: "data/manual/real_world_commands.txt"
+
+paper_sized_splits:   # the paper's 549-command composition, re-drawn from the population (PROTOCOL.md §6)
+  composition: {ART: 149, RedCode-Exec: 71, NL2Bash: 299, Real-world: 30}   # Table I (ART 137 + 12 canonical slots, D2)
+  nl2bash_head_cap: 12       # Table I (stated for the RQ3 pool; inferred for the main split)
+  seeds: [0, 9999]           # inclusive; one split per seed
+  level: 0.95                # a value is "apart" beyond the sigma that spans this share of a normal: 1.96
+
+llm:
+  endpoint: "https://openrouter.ai/api/v1"
+  model: "qwen/qwen3-coder-30b-a3b-instruct"   # paper Sec. IV-D / App. E: Qwen3-Coder-30B-A3B-Instruct
+  provider_order: ["Amazon Bedrock"]
+  allow_fallbacks: false
+  temperature: 0
+  max_tokens: {CARE: 8, PromptOnly: 8, LLMJudge: 8, NeMo self-check: 4}   # App. E Prompts 1-4
+  retries: 6                 # exponential backoff 1,2,4,8,16,30 s; then the method's error policy
+  workers: 16
+  runs: 3                    # independent runs per LLM condition
+
+analysis:
+  primary_run: 1             # fixed in advance; runs 2 and 3 measure serving nondeterminism
+  label_audit: "data/label_audit.yaml"   # sensitivity analysis for C7/C9 only (D17, D28)
+
+smoke:   # REPRO_MODE=smoke: a tiny end-to-end check, never a reproduction
+  commands_per_group: 8
+  composition: {ART: 3, RedCode-Exec: 3, NL2Bash: 3, Real-world: 3}
+  seeds: [0, 199]
+
+reported:   # values printed in the paper (percent / ms)
+  table_ii:
+    cite: "Table II (main split, 549 commands)"
+    rows:
+      NoGuard:               {f1: 0.00,  dr: 0.00,  fpr: 0.00,  latency_ms: 0.00}
+      PromptOnly:            {f1: 66.99, dr: 63.18, fpr: 17.02, latency_ms: 47.97}
+      LLMJudge:              {f1: 73.09, dr: 67.27, fpr: 11.25, latency_ms: 45.90}
+      NeMo self-check:       {f1: 68.63, dr: 58.18, fpr: 7.60,  latency_ms: 95.23}
+      CARE (w/o Resolution): {f1: 84.99, dr: 75.91, fpr: 1.82,  latency_ms: 0.34}
+      CARE:                  {f1: 85.64, dr: 75.91, fpr: 0.91,  latency_ms: 2.32}
+  table_viii:
+    cite: "Table VIII (McNemar, two-sided, Yates)"
+    rows:
+      - {left: "CARE (w/o Resolution)", right: PromptOnly, left_only: 102, right_only: 24, p: 6.9e-12}
+      - {left: "CARE (w/o Resolution)", right: LLMJudge,   left_only: 70,  right_only: 20, p: 2.4e-7}
+      - {left: CARE, right: "CARE (w/o Resolution)",      left_only: 3,   right_only: 0,  p: 0.25}
+  resolution_funnel:
+    cite: "Appendix A.F"
+    n: 549
+    warn: 117
+    skipped: 94
+    escalated: 23
+    judge_allow: 3
+    judge_allow_dangerous: 0

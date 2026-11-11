@@ -1,0 +1,12 @@
+{
+  "mode": "full",
+  "unit_tests": "71 passed in 1.33s",
+  "care_identical_to_release": true,
+  "sources_verified": true,
+  "population_identical_to_committed": true,
+  "static_guards_deterministic": true,
+  "llm_queried_in_this_session": false,
+  "llm_replies_verified_before_reuse": true,
+  "llm_errors": 0,
+  "completed_utc": "2026-11-11T20:57:03.852116+00:00"
+}

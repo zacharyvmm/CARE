@@ -1,0 +1,58 @@
+{
+  "what": "clean-clone validation of protocol v2.0",
+  "commit": "931ebfeaacaf52361034a25b1343bf2c7e659932",
+  "cloned_from": "https://github.com/zacharyvmm/CARE.git (branch experiment/baseline-reproduction)",
+  "environment": {
+    "python": "3.12.13",
+    "venv": "fresh, installed from environment/requirements.lock.txt",
+    "lockfile_mismatches": {}
+  },
+  "mode": "full, no API key (the committed LLM observations are reused after verification)",
+  "uncommitted_changes_before_run": false,
+  "checks": {
+    "mode": "full",
+    "unit_tests": {
+      "returncode": 0,
+      "summary": "72 passed in 1.43s"
+    },
+    "preflight": {
+      "static_rows": 48
+    },
+    "static_deterministic": true,
+    "population_identical_to_committed": true,
+    "sources_verified": true,
+    "llm_executed_in_this_session": false,
+    "llm_cached_rows": 0,
+    "llm_replies_within_live_window": true,
+    "llm_request_identity_verified": true,
+    "llm_errors": 0,
+    "completed_utc": "2026-11-11T19:38:07.254588+00:00"
+  },
+  "stage_seconds": {
+    "unit_tests_s": 2.1,
+    "sources_s": 3.32,
+    "static_s": 22.18,
+    "llm_s": 0.19,
+    "splits_s": 37.07,
+    "analysis_s": 42.92
+  },
+  "outputs_byte_identical_to_committed": [
+    "results/claims.parquet",
+    "results/comparison.parquet",
+    "results/consistency_with_v1.parquet",
+    "results/construction_variants.parquet",
+    "results/label_sensitivity.parquet",
+    "results/metrics.parquet",
+    "results/observations.parquet",
+    "results/oracle_bounds.parquet",
+    "results/paired_differences.parquet",
+    "results/redcode_scenarios.parquet",
+    "results/resolution_funnel.parquet",
+    "results/run_stability.parquet",
+    "results/report.md",
+    "results/figures/f1_over_splits.png",
+    "results/figures/reported_vs_observed.png"
+  ],
+  "differs": "results/provenance.json and results/validation.json (timestamps, timings, repo_head)",
+  "not_covered": "smoke mode and the live LLM path were not run in the clean clone"
+}

@@ -1,0 +1,195 @@
+{
+  "generated_utc": "2026-11-11T20:57:03.724341+00:00",
+  "mode": "full",
+  "run_label": "confirmatory-v2",
+  "protocol_version": "2.1",
+  "protocol_sha256": "6ff814dcf71bb3ee07c4fd76316acca0626e275900f378f272babcf25752ac32",
+  "config_sha256": "8ddaf8da3898a5f39976664bb5ddda10dd188221d784d3bf2a6237405449ed5b",
+  "method_under_test": {
+    "repository": "https://github.com/prisma-research/CARE (this repo, fork zacharyvmm/CARE)",
+    "release_commit": "81dd742",
+    "patches": [],
+    "care_identical_to_release": true
+  },
+  "paper": {
+    "title": "CARE: Pre-Execution Command Verification for Shell-Executing LLM Agents",
+    "authors": "Liu, Zhang, Yang, Zhang, Feng, Wang, Qiu, Liu, Poczos, Hong",
+    "venue": "IEEE ISSRE 2026 (accepted); arXiv preprint",
+    "arxiv": "2607.21642",
+    "version": "v2 (2026-08-06); v1 (2026-07-21) has identical text apart from author order/affiliations",
+    "pdf_sha256": "fe70b54c72caec9f46866c3b9efbf60435eedead982d009bbc4cc81b9b750099",
+    "url": "https://arxiv.org/abs/2607.21642v2"
+  },
+  "sources": {
+    "atomic-red-team": {
+      "url": "https://github.com/redcanaryco/atomic-red-team",
+      "commit": "a0e3f9bc69fed2fd711bd1f1aa87a40c33482fe6",
+      "patterns": [
+        "atomics/T*/T*.yaml",
+        "LICENSE.txt"
+      ],
+      "license": "MIT",
+      "fingerprint": {
+        "n_files": 354,
+        "sha256": "df381cc2e80ec1a9a75584dbccdd5890b025e5e56bb45cf0f53759be9f478fde"
+      }
+    },
+    "RedCode": {
+      "url": "https://github.com/AI-secure/RedCode",
+      "commit": "664e4793dc7309f98b8271baed5bbc04d6ef4c39",
+      "patterns": [
+        "dataset/RedCode-Exec/bash2text_dataset_json/*.json",
+        "dataset/LICENSE",
+        "LICENSE"
+      ],
+      "license": "dataset CC BY 4.0; code MIT",
+      "fingerprint": {
+        "n_files": 22,
+        "sha256": "9f593605f6175f138d73e77601a4e73e57cc03fee8839a52f9859f8bfef5baed"
+      }
+    },
+    "nl2bash": {
+      "url": "https://github.com/TellinaTool/nl2bash",
+      "commit": "d6b9f5bdff45621d190134e31ab63b7bf7002190",
+      "patterns": [
+        "data/bash/all.cm",
+        "data/bash/all.nl",
+        "data/bash/LICENSE"
+      ],
+      "license": "data/bash MIT (repository code GPL-3.0)",
+      "fingerprint": {
+        "n_files": 3,
+        "sha256": "679ae70ec24f6581bd3734c4b26f9adcf5c1284b2f312ec18b437067d4fa49e3"
+      }
+    },
+    "atomic-red-team-2026-03-24": {
+      "url": "https://github.com/redcanaryco/atomic-red-team",
+      "commit": "40a54bf631ced8799676680d78eff30db90abb80",
+      "patterns": [
+        "atomics/T*/T*.yaml",
+        "LICENSE.txt"
+      ],
+      "license": "MIT",
+      "fingerprint": {
+        "n_files": 329,
+        "sha256": "09a324c21fbc405a693742631287bc793670f0a424611b818a8eff3328c52b04"
+      }
+    }
+  },
+  "population": {
+    "n_evaluated": 11665,
+    "n_primary": 11381,
+    "n_dangerous": 1013,
+    "n_safe": 10368,
+    "per_source": {
+      "ART": 415,
+      "RedCode-Exec": 598,
+      "NL2Bash": 10338,
+      "Real-world": 30
+    },
+    "nl2bash_not_counted_as_safe": 284,
+    "sha256": "5b1e7e82676c788779461cd967d818224b79061fe70ad2840a6e9c7e61156ed5"
+  },
+  "paper_sized_splits": {
+    "n": 10000,
+    "seeds": [
+      0,
+      9999
+    ],
+    "split_size": 549,
+    "level": 0.95,
+    "sha256": "1bd7089884bb00dec3724ee811147d1208eb79f21381c6ea14b9498ed5608b6f"
+  },
+  "llm": {
+    "calls": 105651,
+    "errors": 0,
+    "providers": {
+      "Amazon Bedrock": 105651
+    },
+    "prompt_tokens": 11352714,
+    "completion_tokens": 275254,
+    "cost_usd": 1.849378905,
+    "retried_calls": 0,
+    "replies_taken_from_cache": 0,
+    "queried_in_this_session": false,
+    "executed_request_identity": {
+      "run_label": "confirmatory-v2",
+      "executed_at_commit": "9fb29f74ecb574a0fc543d7ddb5ab765ba34e468",
+      "executed_config": {
+        "endpoint": "https://openrouter.ai/api/v1",
+        "model": "qwen/qwen3-coder-30b-a3b-instruct",
+        "provider_order": [
+          "Amazon Bedrock"
+        ],
+        "allow_fallbacks": false,
+        "temperature": 0,
+        "max_tokens": {
+          "CARE": 8,
+          "PromptOnly": 8,
+          "LLMJudge": 8,
+          "NeMo self-check": 4
+        }
+      },
+      "started_utc": "2026-11-11T18:19:53.794180+00:00",
+      "finished_utc": "2026-11-11T18:53:33.388434+00:00",
+      "request_fingerprints": {
+        "CARE": "aae3989aa28d9a3849addca05f641b63b710d943d77975e9d9cc9f652461d38f",
+        "PromptOnly": "3a7485202c8110e240e3bec7766ca625a7cf09ef7a3ea9c0aff342b4261a180b",
+        "LLMJudge": "eb541892322a566d0471e40e6a87553a52f973fb8f6100d412b6928e57a9d26a",
+        "NeMo self-check": "947512a1fddf6e7733b3bb2ec12da32289740c58b4f34b4e97377449d17e814d"
+      }
+    },
+    "requested_config": {
+      "endpoint": "https://openrouter.ai/api/v1",
+      "model": "qwen/qwen3-coder-30b-a3b-instruct",
+      "provider_order": [
+        "Amazon Bedrock"
+      ],
+      "allow_fallbacks": false,
+      "temperature": 0,
+      "max_tokens": {
+        "CARE": 8,
+        "PromptOnly": 8,
+        "LLMJudge": 8,
+        "NeMo self-check": 4
+      },
+      "retries": 6,
+      "workers": 16,
+      "runs": 3
+    }
+  },
+  "environment": {
+    "python": "3.12.13",
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "machine": "x86_64",
+    "cpu_count": 8,
+    "packages": {
+      "pandas": "3.1.1",
+      "pyarrow": "26.0.1",
+      "numpy": "2.5.4",
+      "scipy": "1.18.1",
+      "statsmodels": "0.15.0",
+      "openai": "3.46.0",
+      "bashlex": "0.18",
+      "PyYAML": "6.0.3",
+      "matplotlib": "3.11.2"
+    },
+    "lockfile_mismatches": {},
+    "repo_head": "57ac042ea507b155238bffc6ec3ead2eea423617",
+    "uncommitted_changes": true
+  },
+  "unit_tests": "71 passed in 1.33s",
+  "outputs": {
+    "results/observations.parquet": "3f498e61061a2f71044db8c43953a94e3560ba8208ea5365e5bc505319a292a6",
+    "results/metrics.parquet": "2ec36c3245c8a712e94327155ec9e237b1872cc833ca1e715242f246d3659668",
+    "results/comparison.parquet": "349775acde140fbc3150aeaa6969c1cba299c59da7e69ea544d8187a518db461",
+    "results/paired_differences.parquet": "042f6ce68e6a2f14e2b2d0588435b2f088d5160fa255f887db8616565cf753ff",
+    "results/claims.parquet": "0fb90423178d1da63ddb4abb54c1b6e2eb90793f2d993f88f9474d59af18d4a6",
+    "results/resolution_funnel.parquet": "1104e5ebbc1d8e6baf93673850b8711b499ee5d407cffd5557df4bd1e0cc9b94",
+    "results/oracle_bounds.parquet": "4d9de4f3ab918dcac2f409f921692e9a4ec4c115c04d887e163c3d8baa75a3f5",
+    "results/label_sensitivity.parquet": "f0339548580d0d5f43c1e312c2b6967c038208392d715a86c9ab6f611ec70340",
+    "results/redcode_scenarios.parquet": "9c3cddbe6d03377b1768141167d3a9ddd16d28f41df93856a1e58ee41ab78865",
+    "results/run_stability.parquet": "71c4f0ef003094f4ac41603e71a1e1d78727434be61934832dcf70e2f2a9822f",
+    "results/construction_variants.parquet": "5d7a456a79146ae750e8f5f1c58937e8e0c364fd7becf1728fe8801b8033b252"
+  }
+}
